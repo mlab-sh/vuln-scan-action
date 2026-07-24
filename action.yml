@@ -1,0 +1,52 @@
+name: "vuln.mlab.sh SBOM scan"
+description: "Scan your lockfiles for known CVEs via vuln.mlab.sh — fail the build (or just report) on vulnerable dependencies."
+author: "mlab.sh"
+branding:
+  icon: "shield"
+  color: "red"
+
+inputs:
+  path:
+    description: >
+      Lockfile(s) to scan, newline- or comma-separated. When empty, common
+      lockfiles are auto-detected under `working-directory`.
+    required: false
+    default: ""
+  working-directory:
+    description: "Base directory to auto-detect lockfiles in."
+    required: false
+    default: "."
+  format:
+    description: "Force the parser (auto | npm | cargo | pip | composer | gem | go | cyclonedx | mise)."
+    required: false
+    default: "auto"
+  fail-on:
+    description: >
+      Minimum severity that fails the build: any | critical | high | medium | low | none.
+      `any` fails on any finding (incl. unknown severity); `none` never fails on findings.
+    required: false
+    default: "any"
+  soft-fail:
+    description: "If 'true', never set a failing exit code — report findings and outputs only."
+    required: false
+    default: "false"
+  token:
+    description: "vuln.mlab.sh API token (Authorization: Bearer). Raises the quota to 25 scans/hour. Generate at https://vuln.mlab.sh/me/tokens."
+    required: false
+    default: ""
+  api-url:
+    description: "Scan endpoint."
+    required: false
+    default: "https://vuln.mlab.sh/api/v2/scan"
+
+outputs:
+  total:
+    description: "Total number of vulnerabilities found across all scanned lockfiles."
+  vulnerable-packages:
+    description: "Number of distinct vulnerable packages found."
+  failed:
+    description: "'true' if the fail-on threshold was met (regardless of soft-fail)."
+
+runs:
+  using: "node20"
+  main: "dist/index.js"

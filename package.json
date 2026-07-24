@@ -1,0 +1,19 @@
+{
+  "name": "vuln-scan-action",
+  "version": "1.0.0",
+  "description": "GitHub Action to scan lockfiles for known CVEs via vuln.mlab.sh",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "ncc build src/index.ts -o dist --minify",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@actions/core": "^1.11.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@vercel/ncc": "^0.38.1",
+    "typescript": "^5.5.0"
+  }
+}

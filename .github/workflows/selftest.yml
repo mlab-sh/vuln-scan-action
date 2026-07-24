@@ -1,0 +1,34 @@
+name: Self-test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # Scans a fixture with a known-vulnerable crate. soft-fail keeps the job green
+  # while asserting the action detected the vulnerability.
+  detects-vulnerable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: scan
+        uses: ./
+        with:
+          path: test/fixtures/Cargo.lock
+          soft-fail: "true"
+      - name: Assert a vulnerability was found
+        run: |
+          echo "total=${{ steps.scan.outputs.total }}"
+          test "${{ steps.scan.outputs.total }}" -ge 1
+
+  # A clean set must pass with the default (hard) fail mode.
+  passes-when-clean:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: printf '[[package]]\nname = "serde"\nversion = "1.0.210"\n' > /tmp/Clean.lock
+      - uses: ./
+        with:
+          path: /tmp/Clean.lock
+          format: cargo
