@@ -54,6 +54,25 @@ token gets you a dedicated **25 scans/hour**.
 `npm-shrinkwrap.json`, `composer.lock`, `Gemfile.lock`, `go.sum`,
 `requirements.txt`, `mise.lock`. (`node_modules`, `vendor`, `target`, … are skipped.)
 
+## `.mlab/vuln.yml`
+
+The Action reads the same per repo file as the
+[mlab VS Code extension](https://github.com/mlab-sh/vuln-scan-vscode), from the
+repository root, so one file drives both the editor and CI:
+
+```yaml
+# Skip the scan entirely in this repo.
+# disable: true
+
+# Advisories accepted as known risk: not reported, never fail the build.
+ignoreVulns:
+  - CVE-2024-0000   # not reachable: only used in tests
+  - GHSA-xxxx-xxxx-xxxx
+```
+
+Ids are matched against the advisory id and all its aliases. Other keys in the
+file are editor settings and are ignored by the Action.
+
 ## Outputs
 
 | Output | Description |

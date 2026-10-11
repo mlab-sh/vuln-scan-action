@@ -1,6 +1,7 @@
 import * as core from '@actions/core'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { loadVulnYml } from './vulnYml'
 
 // ── Severity model (mirrors the server's normalization) ───────────────────────
 const SEV_RANK: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1, unknown: 0 }
@@ -35,7 +36,7 @@ interface ScanResponse {
   packages?: Array<{ ecosystem?: string; name?: string; version?: string }>
   results: ScanResult[]
 }
-interface Finding { file: string; pkg: string; cve: string; severity: string }
+interface Finding { file: string; pkg: string; cve: string; severity: string; ids: string[] }
 
 function bandFromCvss(score: number): string {
   if (score >= 9) return 'critical'
@@ -121,7 +122,7 @@ async function scanFile(file: string, apiUrl: string, format: string, token: str
     if (!r.ok) { unscannable++; return }
     const p = data.packages?.[i]
     const pkg = p ? `${p.name}@${p.version}` : `#${i}`
-    for (const v of r.vulns ?? []) findings.push({ file: rel, pkg, cve: cveOf(v), severity: severityOf(v) })
+    for (const v of r.vulns ?? []) findings.push({ file: rel, pkg, cve: cveOf(v), severity: severityOf(v), ids: [v.id ?? '', ...(v.aliases ?? [])] })
   })
   if (data.truncated) core.warning(`${rel}: only the first 512 packages were scanned (manifest is larger).`)
   return { findings, deps: data.count, truncated: data.truncated, unscannable }
@@ -166,6 +167,14 @@ async function run(): Promise<void> {
   const workdir = core.getInput('working-directory') || '.'
   const threshold = THRESHOLDS[failOn] ?? 0
 
+  const yml = loadVulnYml(process.cwd())
+  if (yml.disable) {
+    core.notice('mlab is disabled for this repository by `disable: true` in .mlab/vuln.yml. Nothing scanned.')
+    core.setOutput('total', '0'); core.setOutput('vulnerable-packages', '0'); core.setOutput('failed', 'false')
+    return
+  }
+  const ignored = new Set(yml.ignoreVulns.map(s => s.toUpperCase()))
+
   const files = resolveFiles(core.getInput('path'), workdir).filter(f => {
     if (fs.existsSync(f)) return true
     core.warning(`Lockfile not found: ${f}`)
@@ -186,8 +195,12 @@ async function run(): Promise<void> {
     const rel = path.relative(process.cwd(), files[i]) || files[i]
     const res = await scanFile(files[i], apiUrl, format, token)
     if (!res) continue
-    all.push(...res.findings)
-    perFile.push({ file: rel, deps: res.deps, vulns: res.findings.length })
+    const kept = res.findings.filter(f => ![f.cve, ...f.ids].some(id => ignored.has(id.toUpperCase())))
+    if (kept.length < res.findings.length) {
+      core.info(`${rel}: ${res.findings.length - kept.length} finding(s) ignored by .mlab/vuln.yml`)
+    }
+    all.push(...kept)
+    perFile.push({ file: rel, deps: res.deps, vulns: kept.length })
     if (res.unscannable > 0) core.warning(`${rel}: ${res.unscannable} coordinate(s) could not be scanned (upstream) — not counted as clean.`)
   }
 
