@@ -1,12 +1,13 @@
-# vuln.mlab.sh SBOM scan — GitHub Action
+# vuln.mlab.sh SBOM scan: GitHub Action
 
-Scan your lockfiles for known CVEs on every push or pull request, powered by
-[vuln.mlab.sh](https://vuln.mlab.sh). Auto-detects lockfiles, checks every
-dependency against OSV + Sonatype OSS Index, writes a job summary, and fails the
-build (or just reports) based on a severity threshold.
+Scan your lockfiles and SBOMs for known CVEs on every push or pull request,
+powered by [vuln.mlab.sh](https://vuln.mlab.sh). Auto-detects lockfiles, checks
+every dependency against OSV and NVD, annotates the vulnerable lines in the pull
+request, writes a job summary, and fails the build (or just reports) based on a
+severity threshold.
 
-No dependency install, no local database — parsing and scanning happen
-server-side. The Action just uploads your lockfile and reports the result.
+No dependency install, no local database: parsing and scanning happen server
+side. The Action just uploads your lockfile and reports the result.
 
 ## Quick start
 
@@ -30,9 +31,16 @@ known vulnerability.
 
 ## Why a token?
 
-Anonymous scans are rate-limited to **8/hour per IP** — and GitHub-hosted runners
-share egress IPs across many repos, so anonymous CI is unreliable. A personal API
-token gets you a dedicated **25 scans/hour**.
+| | Packages per lockfile | Request size | Cooldown between scans |
+| --- | --- | --- | --- |
+| Anonymous (per IP) | 512 | 4 MiB | 10 s |
+| Free account, with a token | 1024 | 8 MiB | 5 s |
+| Paid plan, with a token | 4096 | 32 MiB | none |
+
+GitHub-hosted runners share egress IPs across many repositories, so an anonymous
+cooldown can be taken by someone else's job. The Action waits out the cooldown
+the server announces and retries, but a token is faster and steadier, and its
+scans land in your history on vuln.mlab.sh.
 
 1. Sign in at [vuln.mlab.sh/me/tokens](https://vuln.mlab.sh/me/tokens) and generate a token.
 2. Add it as a repository secret named `VULN_MLAB_TOKEN`.
@@ -42,17 +50,23 @@ token gets you a dedicated **25 scans/hour**.
 
 | Input | Default | Description |
 | --- | --- | --- |
-| `path` | *(auto-detect)* | Lockfile(s) to scan, newline- or comma-separated. |
+| `path` | *(auto-detect)* | Lockfile(s) or SBOM(s) to scan, newline- or comma-separated. |
 | `working-directory` | `.` | Base directory for auto-detection. |
-| `format` | `auto` | Force the parser: `npm`, `cargo`, `pip`, `composer`, `gem`, `go`, `cyclonedx`, `mise`. |
+| `format` | `auto` | Force the parser: `npm`, `yarn`, `pnpm`, `cargo`, `pip`, `poetry`, `uv`, `pdm`, `pipfile`, `composer`, `gem`, `go`, `maven`, `nuget`, `pub`, `hex`, `mise`, `cyclonedx`, `spdx`. |
 | `fail-on` | `any` | Minimum severity that fails the build: `any`, `critical`, `high`, `medium`, `low`, `none`. |
-| `soft-fail` | `false` | If `true`, never fail the build — report findings and set outputs only. |
+| `fail-on-incomplete` | `false` | If `true`, also fail when some package was not scanned (manifest over your package limit, git or path dependency, outage). Always reported either way. |
+| `soft-fail` | `false` | If `true`, never fail the build: report findings and set outputs only. |
 | `token` | *(none)* | vuln.mlab.sh API token. Strongly recommended for CI. |
 | `api-url` | `https://vuln.mlab.sh/api/v2/scan` | Override the scan endpoint. |
 
 **Auto-detected lockfiles:** `Cargo.lock`, `package-lock.json`,
-`npm-shrinkwrap.json`, `composer.lock`, `Gemfile.lock`, `go.sum`,
-`requirements.txt`, `mise.lock`. (`node_modules`, `vendor`, `target`, … are skipped.)
+`npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `composer.lock`,
+`Gemfile.lock`, `go.sum`, `requirements.txt`, `poetry.lock`, `uv.lock`,
+`pdm.lock`, `Pipfile.lock`, `pom.xml`, `gradle.lockfile`, `packages.lock.json`,
+`pubspec.lock`, `mix.lock`, `mise.lock`, and CycloneDX SBOMs named `bom.json` or
+`bom.xml`. (`node_modules`, `vendor`, `target`, … are skipped.) Any other SBOM
+(SPDX, a differently named CycloneDX file) can be passed in `path`; components
+without a purl are matched by their CPE.
 
 ## `.mlab/vuln.yml`
 
@@ -77,9 +91,12 @@ file are editor settings and are ignored by the Action.
 
 | Output | Description |
 | --- | --- |
-| `total` | Total vulnerabilities found across all lockfiles. |
+| `total` | Vulnerabilities found across all lockfiles, one per package and CVE. |
 | `vulnerable-packages` | Number of distinct vulnerable packages. |
-| `failed` | `true` if the `fail-on` threshold was met (regardless of `soft-fail`). |
+| `critical`, `high`, `medium`, `low`, `unknown` | Findings per severity. |
+| `incomplete` | `true` if some package was not scanned (limit, unscannable entry, outage, or a lockfile that failed). |
+| `not-scanned` | Packages left out because a manifest exceeded the package limit. |
+| `failed` | `true` if the gate failed: `fail-on` threshold met, a lockfile could not be scanned, or incomplete with `fail-on-incomplete` (regardless of `soft-fail`). |
 
 ## Examples
 
@@ -104,7 +121,7 @@ file are editor settings and are ignored by the Action.
     token: ${{ secrets.VULN_MLAB_TOKEN }}
 ```
 
-**Monorepo — scan several lockfiles:**
+**Monorepo, scan several lockfiles:**
 
 ```yaml
 - uses: mlab-sh/vuln-scan-action@v1
@@ -122,25 +139,33 @@ Each lockfile is POSTed to [`/api/v2/scan`](https://vuln.mlab.sh/api). The servi
 parses it, resolves every dependency's known vulnerabilities, and returns one
 result per package. The Action then:
 
-- normalizes each finding's severity,
+- merges the advisories that describe the same CVE (GHSA + RUSTSEC …) into one
+  finding per package, keeping the worst severity,
+- scores CVSS vectors when an advisory has no severity label,
 - applies your `fail-on` threshold,
-- annotates the worst offenders inline (errors for high/critical, warnings otherwise),
-- writes a summary table to the job summary,
-- sets the `total` / `vulnerable-packages` / `failed` outputs.
+- annotates the worst offenders on the line of the lockfile that declares them
+  (errors for high/critical, warnings otherwise),
+- writes a summary to the job summary: coverage per lockfile, findings with the
+  version that fixes them,
+- sets the outputs.
 
 ## Notes
 
-- Coordinates the scanner couldn't resolve (upstream outage) are surfaced as
-  warnings and **not** counted as clean — they never silently pass a gate.
-- Manifests over 512 packages are scanned up to that ceiling (a warning is
-  emitted); split very large monorepos across multiple lockfile paths.
-- When scanning multiple lockfiles the Action spaces requests ~1s apart to stay
-  within the per-token rate limit.
+- Packages the scan did not cover are never counted as clean: a manifest over
+  your package limit, entries the server cannot scan (git or path dependencies,
+  unpinned versions, SBOM components with neither purl nor CPE), and packages
+  left unchecked during an outage are listed as warnings and in the summary. Set
+  `fail-on-incomplete: true` to fail the gate on them.
+- A lockfile that cannot be scanned at all (over the size limit, unreachable
+  server) fails the gate after the other lockfiles are scanned and reported.
+- Between lockfiles the Action waits out the cooldown the server announces, and
+  on a 429 waits and retries; network errors and 5xx are retried with backoff.
 
 ## Development
 
 ```bash
 npm ci
+npm test        # unit tests of src/core.ts (Node 24+ runs TypeScript directly)
 npm run build   # bundles src/index.ts → dist/index.js (committed)
 ```
 

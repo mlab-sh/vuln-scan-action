@@ -32,3 +32,22 @@ jobs:
         with:
           path: /tmp/Clean.lock
           format: cargo
+
+  # Two lockfiles, anonymous: the second scan has to wait out the server's
+  # cooldown (10 s per IP) instead of failing on a 429.
+  multi-file-cooldown:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: scan
+        uses: ./
+        with:
+          path: |
+            test/fixtures/Cargo.lock
+            test/fixtures/package-lock.json
+          soft-fail: "true"
+      - name: Assert both lockfiles were scanned
+        run: |
+          echo "total=${{ steps.scan.outputs.total }} incomplete=${{ steps.scan.outputs.incomplete }} high=${{ steps.scan.outputs.high }}"
+          test "${{ steps.scan.outputs.total }}" -ge 2
+          test "${{ steps.scan.outputs.incomplete }}" = "false"
