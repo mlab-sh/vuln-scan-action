@@ -289,7 +289,7 @@ function writeSummary(s: Session, all: Finding[], reports: FileReport[], counts:
   ])
 
   if (hits.length) {
-    sum.addHeading('Gate', 3).addList(hits.map(h => `${h.action === 'block' ? '⛔ block' : '⚠️ warn'}: \`${h.rule}\`: ${h.reason}`))
+    sum.addHeading('Gate', 3).addList(hits.map(h => `${h.action === 'block' ? '⛔ block' : '⚠️ warn'}: <code>${h.rule}</code>: ${h.reason}`))
   }
 
   const problems = reports.flatMap(r => [...(r.error ? [`**${r.file}** could not be scanned: ${r.error}`] : []), ...r.gaps.map(g => `**${r.file}**: ${g}`)])
