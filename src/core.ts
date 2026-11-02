@@ -399,6 +399,29 @@ export function scoreBadge(findings: Finding[], incomplete: boolean, label = 'ml
   return badgeSvg(label, `${score}/100`, badgeColor(score))
 }
 
+// ── Attestation ──────────────────────────────────────────────────────────────
+
+export const VULN_PREDICATE_TYPE = 'https://in-toto.io/attestation/vulns/v0.1'
+
+/**
+ * The scan as an in-toto vulnerability predicate, for `actions/attest` to sign
+ * (Sigstore) and bind to an artifact and commit. Signing stays with GitHub:
+ * this only states what was found.
+ */
+export function vulnPredicate(findings: Finding[], startedOn: Date, finishedOn: Date): object {
+  return {
+    scanner: {
+      uri: 'https://vuln.mlab.sh',
+      result: findings.map(f => ({
+        id: f.cve,
+        severity: [{ method: 'mlab', score: f.severity }],
+        annotations: [{ package: f.pkg, lockfile: f.file, ...(f.fixed ? { fixed: f.fixed } : {}), ...(f.intel?.kev ? { kev: true } : {}) }],
+      })),
+    },
+    metadata: { scanStartedOn: startedOn.toISOString(), scanFinishedOn: finishedOn.toISOString() },
+  }
+}
+
 // ── SARIF ────────────────────────────────────────────────────────────────────
 
 /** `security-severity` GitHub sorts alerts by: the middle of each CVSS band. */

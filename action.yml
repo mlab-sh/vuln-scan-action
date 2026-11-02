@@ -82,6 +82,12 @@ inputs:
       The Action only writes the file: commit it in a later step.
     required: false
     default: ""
+  attestation-predicate:
+    description: >
+      Write the scan as an in-toto vulnerability predicate (vulns/v0.1) to this path,
+      for actions/attest to sign and bind to your artifact and commit.
+    required: false
+    default: ""
   github-token:
     description: "Token for the GitHub API (SARIF upload)."
     required: false
@@ -110,6 +116,10 @@ outputs:
     description: "'true' if a block gate rule fired (by default: fail-on threshold met, a lockfile could not be scanned, or incomplete with fail-on-incomplete), regardless of soft-fail."
   score:
     description: "0 to 100: 100 with no finding, minus 20 a critical, 10 a high, 4 a medium, 1 a low, 2 an unknown, 20 more when in KEV."
+  attestation-predicate:
+    description: "Path of the attestation predicate written, when one was."
+  attestation-predicate-type:
+    description: "Its predicate type, to pass to actions/attest: https://in-toto.io/attestation/vulns/v0.1."
   sarif-file:
     description: "Path of the SARIF file written, when one was."
 

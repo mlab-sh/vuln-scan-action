@@ -1,7 +1,7 @@
 // node --test test/*.test.ts (Node 24+ runs TypeScript by stripping types)
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cveOf, errorFor, evaluateGate, findingsOf, gateRules, isIgnored, locateLine, intelNeeded, intelOf, monitorBranch, parseRule, rawUrl, scoreBadge, scoreFor, scoreOf, severityOf, toSarif, KNOWN, THRESHOLDS } from '../src/core.ts'
+import { cveOf, errorFor, evaluateGate, findingsOf, gateRules, isIgnored, locateLine, intelNeeded, intelOf, monitorBranch, parseRule, rawUrl, scoreBadge, scoreFor, vulnPredicate, scoreOf, severityOf, toSarif, KNOWN, THRESHOLDS } from '../src/core.ts'
 import type { Finding } from '../src/core.ts'
 import { parseFlatYaml } from '../src/vulnYml.ts'
 
@@ -154,4 +154,15 @@ test('score, score rule and badge', () => {
   assert.match(svg, /^<svg[^>]+aria-label="mlab vulns: 90\/100"/)
   assert.match(svg, /fill="#4c1"/)
   assert.match(scoreBadge([], true), /incomplete/)
+})
+
+test('attestation predicate follows in-toto vulns/v0.1', () => {
+  const p = vulnPredicate([{ ...finding('high'), fixed: '0.2.23', intel: { kev: true } }], new Date(0), new Date(1000)) as any
+  assert.equal(p.scanner.uri, 'https://vuln.mlab.sh')
+  assert.deepEqual(p.scanner.result[0], {
+    id: 'CVE-2024-0001',
+    severity: [{ method: 'mlab', score: 'high' }],
+    annotations: [{ package: 'time@0.1.43', lockfile: 'Cargo.lock', fixed: '0.2.23', kev: true }],
+  })
+  assert.deepEqual(p.metadata, { scanStartedOn: '1970-01-01T00:00:00.000Z', scanFinishedOn: '1970-01-01T00:00:01.000Z' })
 })

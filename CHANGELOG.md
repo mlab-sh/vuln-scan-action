@@ -17,6 +17,9 @@
   for a rescan when already monitored. `monitor-source-token` for private repos.
 - **Score and README badge**: output `score` (0 to 100), a `score<N` gate
   rule, and `badge-file` to write an SVG badge with the score.
+- **Scan attestation**: `attestation-predicate` writes the scan as an in-toto
+  `vulns/v0.1` predicate for `actions/attest` (Sigstore, GitHub Artifact
+  Attestations) to sign and bind to an artifact and commit.
 - **SARIF and GitHub Code Scanning**: `sarif-file` writes the findings as SARIF
   2.1.0, `upload-sarif: true` uploads them to the Security tab (needs
   `security-events: write`). Output `sarif-file`.

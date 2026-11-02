@@ -4,7 +4,7 @@ import * as path from 'node:path'
 import * as zlib from 'node:zlib'
 import {
   Finding, GateHit, KNOWN, Refusal, ScanRefused, ScanResponse, SEV_RANK, SEVERITIES, Upgrade,
-  errorFor, evaluateGate, findingsOf, gateRules, intelNeeded, intelOf, isIgnored, locateLine, monitorBranch, rawUrl, scoreBadge, scoreFor, toSarif,
+  errorFor, evaluateGate, findingsOf, gateRules, intelNeeded, intelOf, isIgnored, locateLine, monitorBranch, rawUrl, scoreBadge, scoreFor, toSarif, VULN_PREDICATE_TYPE, vulnPredicate,
 } from './core'
 import { loadVulnYml } from './vulnYml'
 
@@ -353,6 +353,7 @@ const EMPTY_OUTPUTS = {
 }
 
 async function run(): Promise<void> {
+  const startedOn = new Date()
   const failOn = (core.getInput('fail-on') || 'any').toLowerCase()
   const failOnIncomplete = core.getInput('fail-on-incomplete') ? core.getBooleanInput('fail-on-incomplete') : false
   const workdir = core.getInput('working-directory') || '.'
@@ -446,6 +447,14 @@ async function run(): Promise<void> {
     fs.mkdirSync(path.dirname(badgeFile), { recursive: true })
     fs.writeFileSync(badgeFile, scoreBadge(all, incomplete))
     core.info(`Badge written to ${badgeFile}.`)
+  }
+
+  const predicateFile = core.getInput('attestation-predicate')
+  if (predicateFile) {
+    fs.mkdirSync(path.dirname(predicateFile), { recursive: true })
+    fs.writeFileSync(predicateFile, JSON.stringify(vulnPredicate(all, startedOn, new Date()), null, 2))
+    core.setOutput('attestation-predicate', predicateFile)
+    core.setOutput('attestation-predicate-type', VULN_PREDICATE_TYPE)
   }
 
   const reasons = hits.filter(h => h.action === 'block').map(h => h.reason)

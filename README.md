@@ -63,6 +63,7 @@ scans land in your history on vuln.mlab.sh.
 | `monitor` | `false` | If `true`, on a push to the default branch, register the lockfiles on vuln.mlab.sh for continuous monitoring (Pro plan). |
 | `monitor-source-token` | *(none)* | Private repo only: a read-only token mlab uses to fetch the lockfiles on each rescan. |
 | `badge-file` | *(none)* | Write an SVG badge with the score to this path (commit it in a later step). |
+| `attestation-predicate` | *(none)* | Write the scan as an in-toto vulnerability predicate to this path, for `actions/attest`. |
 | `github-token` | `${{ github.token }}` | Token for the GitHub API (SARIF upload). |
 
 **Auto-detected lockfiles:** `Cargo.lock`, `package-lock.json`,
@@ -149,6 +150,7 @@ it. An unknown rule fails the run rather than leaving the gate open.
 | `incomplete` | `true` if some package was not scanned (limit, unscannable entry, outage, or a lockfile that failed). |
 | `not-scanned` | Packages left out because a manifest exceeded the package limit. |
 | `score` | 0 to 100: 100 with no finding, minus 20 a critical, 10 a high, 4 a medium, 1 a low, 2 an unknown, and 20 more for a CVE in KEV (when a `kev`, `epss` or `actor` rule looked it up). |
+| `attestation-predicate`, `attestation-predicate-type` | Path and type of the predicate written, for `actions/attest`. |
 | `sarif-file` | Path of the SARIF file written, when one was. |
 | `failed` | `true` if a `block` rule fired (by default: `fail-on` threshold met, a lockfile could not be scanned, or incomplete with `fail-on-incomplete`), regardless of `soft-fail`. |
 
@@ -237,6 +239,39 @@ steps:
 The badge shows `score/100`, green to red, or a grey `incomplete` when the scan
 did not cover every package. Lockfiles monitored on vuln.mlab.sh also have a
 server-side badge (`/badge/sbom/<key>.svg`) that follows the rescans.
+
+**Signed attestation of the scan (SLSA / Sigstore):**
+
+The Action writes the scan as an
+[in-toto vulnerability predicate](https://github.com/in-toto/attestation/tree/main/spec/predicates)
+(`vulns/v0.1`); [GitHub Artifact Attestations](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations)
+sign it with Sigstore and bind it to your artifact and the commit, next to its
+build provenance:
+
+```yaml
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+steps:
+  - uses: actions/checkout@v4
+  - run: make dist/app.tar.gz
+  - id: scan
+    uses: mlab-sh/vuln-scan-action@v1
+    with:
+      attestation-predicate: ${{ runner.temp }}/vulns.json
+      token: ${{ secrets.VULN_MLAB_TOKEN }}
+  - uses: actions/attest@v2
+    with:
+      subject-path: dist/app.tar.gz
+      predicate-type: ${{ steps.scan.outputs.attestation-predicate-type }}
+      predicate-path: ${{ steps.scan.outputs.attestation-predicate }}
+```
+
+Verify it with
+`gh attestation verify dist/app.tar.gz --repo <owner>/<repo> --predicate-type https://in-toto.io/attestation/vulns/v0.1`.
+A gate that fails stops the job before the attestation; use `soft-fail` to
+attest a failing scan too.
 
 **Continuous monitoring on vuln.mlab.sh:**
 
