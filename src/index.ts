@@ -2,8 +2,8 @@ import * as core from '@actions/core'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import {
-  Finding, KNOWN, Refusal, ScanRefused, ScanResponse, SEV_RANK, SEVERITIES, THRESHOLDS, Upgrade,
-  errorFor, findingsOf, isIgnored, locateLine,
+  Finding, GateHit, KNOWN, Refusal, ScanRefused, ScanResponse, SEV_RANK, SEVERITIES, Upgrade,
+  errorFor, evaluateGate, findingsOf, gateRules, isIgnored, locateLine,
 } from './core'
 import { loadVulnYml } from './vulnYml'
 
@@ -176,7 +176,7 @@ function limitsLine(s: Session): string | undefined {
   return `Scanned ${who}: up to ${s.limits.max_packages} packages per lockfile, ${gap}.`
 }
 
-function writeSummary(s: Session, all: Finding[], reports: FileReport[], counts: Record<string, number>) {
+function writeSummary(s: Session, all: Finding[], reports: FileReport[], counts: Record<string, number>, hits: GateHit[]) {
   const sum = core.summary.addHeading('vuln.mlab.sh SBOM scan', 2)
   sum.addRaw(all.length === 0
     ? '✅ No known vulnerabilities found.'
@@ -194,6 +194,10 @@ function writeSummary(s: Session, all: Finding[], reports: FileReport[], counts:
       r.error ? '❌ not scanned' : r.gaps.length ? '⚠️ partial' : '✅ complete',
     ]),
   ])
+
+  if (hits.length) {
+    sum.addHeading('Gate', 3).addList(hits.map(h => `${h.action === 'block' ? '⛔ block' : '⚠️ warn'}: \`${h.rule}\`: ${h.reason}`))
+  }
 
   const problems = reports.flatMap(r => [...(r.error ? [`**${r.file}** could not be scanned: ${r.error}`] : []), ...r.gaps.map(g => `**${r.file}**: ${g}`)])
   if (problems.length) {
@@ -228,10 +232,8 @@ const EMPTY_OUTPUTS = {
 
 async function run(): Promise<void> {
   const failOn = (core.getInput('fail-on') || 'any').toLowerCase()
-  const softFail = core.getBooleanInput('soft-fail')
   const failOnIncomplete = core.getInput('fail-on-incomplete') ? core.getBooleanInput('fail-on-incomplete') : false
   const workdir = core.getInput('working-directory') || '.'
-  const threshold = THRESHOLDS[failOn] ?? 0
   const session: Session = {
     apiUrl: core.getInput('api-url') || 'https://vuln.mlab.sh/api/v2/scan',
     token: core.getInput('token'),
@@ -247,6 +249,8 @@ async function run(): Promise<void> {
     return
   }
   const ignored = new Set(yml.ignoreVulns.map(s => s.toUpperCase()))
+  const rules = gateRules(yml, failOn, failOnIncomplete)
+  const softFail = core.getBooleanInput('soft-fail') || yml.notify
 
   const files = resolveFiles(core.getInput('path'), workdir).filter(f => {
     if (fs.existsSync(f)) return true
@@ -287,17 +291,17 @@ async function run(): Promise<void> {
   }
   if (session.upgrade) core.notice(`${session.upgrade.message} ${session.upgrade.url}`)
 
-  writeSummary(session, all, reports, counts)
+  const incomplete = reports.some(r => r.error || r.gaps.length)
+  const hits = evaluateGate(rules, {
+    findings: all,
+    unscannedFiles: reports.filter(r => r.error).length,
+    partial: reports.some(r => r.gaps.length),
+  })
+  writeSummary(session, all, reports, counts, hits)
   await core.summary.write()
 
-  const failing = threshold === Infinity ? [] : all.filter(f => SEV_RANK[f.severity] >= threshold)
-  const unscannedFiles = reports.filter(r => r.error)
-  const incomplete = reports.some(r => r.error || r.gaps.length)
-  const reasons = [
-    ...(failing.length ? [`${failing.length} finding(s) at or above the '${failOn}' threshold`] : []),
-    ...(unscannedFiles.length ? [`${unscannedFiles.length} lockfile(s) could not be scanned`] : []),
-    ...(failOnIncomplete && incomplete && !unscannedFiles.length ? ['the scan did not cover every package (fail-on-incomplete)'] : []),
-  ]
+  const reasons = hits.filter(h => h.action === 'block').map(h => h.reason)
+  for (const h of hits) if (h.action === 'warn') core.warning(`Gate (warn) ${h.rule}: ${h.reason}`)
   const failed = reasons.length > 0
   const notScanned = reports.reduce((n, r) => n + (r.total - r.scanned), 0)
 
@@ -315,7 +319,7 @@ async function run(): Promise<void> {
     : 'No known vulnerabilities found.'
   if (failed && !softFail) core.setFailed(`${line} Failing: ${reasons.join('; ')}.`)
   else if (failed) core.warning(`${line} ${reasons.join('; ')} (soft-fail: not failing the build).`)
-  else core.info(`${line}${all.length ? ` None at or above the '${failOn}' threshold.` : ''}`)
+  else core.info(`${line}${all.length ? ' No block rule fired.' : ''}`)
 }
 
 run().catch(err => core.setFailed(err instanceof Error ? err.message : String(err)))

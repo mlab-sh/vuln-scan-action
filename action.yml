@@ -26,6 +26,7 @@ inputs:
     description: >
       Minimum severity that fails the build: any | critical | high | medium | low | none.
       `any` fails on any finding (incl. unknown severity); `none` never fails on findings.
+      Ignored when .mlab/vuln.yml has `block:` or `warn:` gate rules.
     required: false
     default: "any"
   fail-on-incomplete:
@@ -72,7 +73,7 @@ outputs:
   not-scanned:
     description: "Number of packages left out because a manifest exceeded the package limit."
   failed:
-    description: "'true' if the gate failed (fail-on threshold met, a lockfile could not be scanned, or incomplete with fail-on-incomplete), regardless of soft-fail."
+    description: "'true' if a block gate rule fired (by default: fail-on threshold met, a lockfile could not be scanned, or incomplete with fail-on-incomplete), regardless of soft-fail."
 
 runs:
   using: "node24"

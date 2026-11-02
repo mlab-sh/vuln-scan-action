@@ -2,9 +2,12 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 
 // `.mlab/vuln.yml`, the same per repo file the mlab VS Code extension reads.
-// The Action honours the two keys that make sense in CI:
+// The Action honours the keys that make sense in CI:
 //   disable: true       skip the scan entirely
 //   ignoreVulns: [...]  advisory ids (CVE, GHSA, ...) accepted as known risk
+//   block: [...]        gate rules that fail the check (see core.ts parseRule)
+//   warn: [...]         gate rules that only report
+//   mode: notify        never fail the check (gate is the default)
 // Other keys are editor settings and are ignored here.
 //
 // The parser is a copy of mlab-sh/vuln-scan-vscode src/configCore.ts, keep
@@ -16,6 +19,9 @@ import * as path from 'node:path'
 export interface VulnYml {
   disable: boolean
   ignoreVulns: string[]
+  block?: string[]
+  warn?: string[]
+  notify: boolean
 }
 
 export function loadVulnYml(root: string): VulnYml {
@@ -23,14 +29,21 @@ export function loadVulnYml(root: string): VulnYml {
   try {
     text = fs.readFileSync(path.join(root, '.mlab', 'vuln.yml'), 'utf8')
   } catch {
-    return { disable: false, ignoreVulns: [] }
+    return { disable: false, ignoreVulns: [], notify: false }
   }
   const raw = parseFlatYaml(text)
-  const list = typeof raw.ignoreVulns === 'string' ? [raw.ignoreVulns] : raw.ignoreVulns
   return {
     disable: raw.disable === true,
-    ignoreVulns: Array.isArray(list) ? list.map(s => s.trim()).filter(Boolean) : [],
+    ignoreVulns: listOf(raw.ignoreVulns) ?? [],
+    block: listOf(raw.block),
+    warn: listOf(raw.warn),
+    notify: String(raw.mode ?? '').toLowerCase() === 'notify',
   }
+}
+
+function listOf(v: YamlValue | undefined): string[] | undefined {
+  const list = typeof v === 'string' ? [v] : v
+  return Array.isArray(list) ? list.map(s => s.trim()).filter(Boolean) : undefined
 }
 
 export type YamlValue = string | number | boolean | string[]

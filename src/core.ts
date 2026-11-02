@@ -222,6 +222,91 @@ export function isIgnored(f: Finding, ignored: Set<string>): boolean {
   return [f.cve, ...f.ids].some((id) => ignored.has(id.toUpperCase()))
 }
 
+// ── Gate ─────────────────────────────────────────────────────────────────────
+// A rule is a string from `.mlab/vuln.yml` (`block:` / `warn:` lists) or built
+// from the `fail-on` inputs. A `block` rule that fires fails the check, a
+// `warn` rule only reports.
+
+export type GateAction = 'block' | 'warn'
+
+export interface Rule {
+  raw: string
+  kind: 'severity' | 'unscanned' | 'incomplete'
+  value?: number
+}
+
+export interface GateInput {
+  findings: Finding[]
+  /** Lockfiles that could not be scanned at all. */
+  unscannedFiles: number
+  /** Some package of a scanned lockfile was not checked (limit, unscannable entry, outage). */
+  partial: boolean
+}
+
+export interface GateHit {
+  rule: string
+  action: GateAction
+  reason: string
+}
+
+/** Parse one rule, or throw on a typo: a rule silently ignored is a gate silently open. */
+export function parseRule(raw: string): Rule {
+  const s = raw.trim().toLowerCase().replace(/\s+/g, '')
+  const sev = /^severity>=(\w+)$/.exec(s)
+  if (sev && THRESHOLDS[sev[1]] !== undefined && THRESHOLDS[sev[1]] !== Infinity) return { raw, kind: 'severity', value: THRESHOLDS[sev[1]] }
+  if (s === 'unscanned' || s === 'incomplete') return { raw, kind: s }
+  throw new Error(`Unknown gate rule '${raw}'. Expected severity>=<any|low|medium|high|critical>, unscanned or incomplete.`)
+}
+
+function reasonFor(r: Rule, input: GateInput): string | undefined {
+  switch (r.kind) {
+    case 'severity': {
+      const n = input.findings.filter(f => SEV_RANK[f.severity] >= r.value!).length
+      return n ? `${n} finding(s) match ${r.raw}` : undefined
+    }
+    case 'unscanned':
+      return input.unscannedFiles ? `${input.unscannedFiles} lockfile(s) could not be scanned` : undefined
+    case 'incomplete':
+      return input.partial ? 'the scan did not cover every package' : undefined
+  }
+}
+
+/** Every rule that fires, block rules first. */
+export function evaluateGate(rules: Record<GateAction, Rule[]>, input: GateInput): GateHit[] {
+  const hits: GateHit[] = []
+  for (const action of ['block', 'warn'] as const) {
+    for (const r of rules[action]) {
+      const reason = reasonFor(r, input)
+      if (reason) hits.push({ rule: r.raw, action, reason })
+    }
+  }
+  return hits
+}
+
+/**
+ * The rules of a run: the lists of `.mlab/vuln.yml` when it has any, else the
+ * `fail-on` inputs. A lockfile that could not be scanned blocks unless a list
+ * names `unscanned` itself.
+ */
+export function gateRules(
+  yml: { block?: string[]; warn?: string[] },
+  failOn: string,
+  failOnIncomplete: boolean,
+): Record<GateAction, Rule[]> {
+  let block: string[]
+  let warn: string[]
+  if (yml.block || yml.warn) {
+    block = yml.block ?? []
+    warn = yml.warn ?? []
+  } else {
+    block = [...(THRESHOLDS[failOn] === Infinity ? [] : [`severity>=${failOn}`]), ...(failOnIncomplete ? ['incomplete'] : [])]
+    warn = []
+  }
+  const rules = { block: block.map(parseRule), warn: warn.map(parseRule) }
+  if (![...rules.block, ...rules.warn].some(r => r.kind === 'unscanned')) rules.block.push(parseRule('unscanned'))
+  return rules
+}
+
 // ── Refusals ─────────────────────────────────────────────────────────────────
 
 export type RefusalKind = 'cooldown' | 'too-large' | 'auth' | 'unparseable' | 'http'

@@ -87,6 +87,30 @@ ignoreVulns:
 Ids are matched against the advisory id and all its aliases. Other keys in the
 file are editor settings and are ignored by the Action.
 
+### Gate rules
+
+Instead of one `fail-on` threshold, list rules under `block:` (fails the check)
+and `warn:` (reported as a warning and in the job summary, never fails):
+
+```yaml
+mode: gate          # or `notify`: report every rule, never fail (like soft-fail)
+block:
+  - severity>=high
+warn:
+  - severity>=medium
+  - incomplete
+```
+
+| Rule | Fires when |
+| --- | --- |
+| `severity>=<any\|low\|medium\|high\|critical>` | a finding is at or above that severity |
+| `unscanned` | a lockfile could not be scanned at all |
+| `incomplete` | some package of a scanned lockfile was not checked (package limit, git or path dependency, outage) |
+
+When the file has a `block:` or `warn:` list, the rules replace the `fail-on`
+and `fail-on-incomplete` inputs. `unscanned` blocks unless one of the lists names
+it. An unknown rule fails the run rather than leaving the gate open.
+
 ## Outputs
 
 | Output | Description |
@@ -96,7 +120,7 @@ file are editor settings and are ignored by the Action.
 | `critical`, `high`, `medium`, `low`, `unknown` | Findings per severity. |
 | `incomplete` | `true` if some package was not scanned (limit, unscannable entry, outage, or a lockfile that failed). |
 | `not-scanned` | Packages left out because a manifest exceeded the package limit. |
-| `failed` | `true` if the gate failed: `fail-on` threshold met, a lockfile could not be scanned, or incomplete with `fail-on-incomplete` (regardless of `soft-fail`). |
+| `failed` | `true` if a `block` rule fired (by default: `fail-on` threshold met, a lockfile could not be scanned, or incomplete with `fail-on-incomplete`), regardless of `soft-fail`. |
 
 ## Examples
 
@@ -142,7 +166,7 @@ result per package. The Action then:
 - merges the advisories that describe the same CVE (GHSA + RUSTSEC …) into one
   finding per package, keeping the worst severity,
 - scores CVSS vectors when an advisory has no severity label,
-- applies your `fail-on` threshold,
+- applies your gate rules (`block` / `warn`, or the `fail-on` threshold),
 - annotates the worst offenders on the line of the lockfile that declares them
   (errors for high/critical, warnings otherwise),
 - writes a summary to the job summary: coverage per lockfile, findings with the

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Gate rules** in `.mlab/vuln.yml`: `block:` and `warn:` lists of rules
+  (`severity>=high`, `unscanned`, `incomplete`), and `mode: notify` to never
+  fail. Fired rules are listed in the job summary. Without lists, `fail-on`
+  and `fail-on-incomplete` behave as before.
+
 ## v1.1.0 - 2026-10-11
 
 Follows the vuln.mlab.sh scan API changes, and fixes what they exposed.

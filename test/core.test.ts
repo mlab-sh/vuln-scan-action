@@ -1,7 +1,9 @@
 // node --test test/*.test.ts (Node 24+ runs TypeScript by stripping types)
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cveOf, errorFor, findingsOf, isIgnored, locateLine, scoreOf, severityOf, KNOWN, THRESHOLDS } from '../src/core.ts'
+import { cveOf, errorFor, evaluateGate, findingsOf, gateRules, isIgnored, locateLine, parseRule, scoreOf, severityOf, KNOWN, THRESHOLDS } from '../src/core.ts'
+import type { Finding } from '../src/core.ts'
+import { parseFlatYaml } from '../src/vulnYml.ts'
 
 test('a CVSS vector is scored, not read as "unknown"', () => {
   // The bug this fixes: parseFloat("A:H") on the vector tail gave NaN.
@@ -80,4 +82,24 @@ test('formats and thresholds', () => {
   assert.equal(KNOWN['bom.xml'], 'cyclonedx')
   assert.equal(THRESHOLDS.none, Infinity)
   assert.equal(THRESHOLDS.high, 3)
+})
+
+const finding = (severity: string, cve = 'CVE-2024-0001'): Finding =>
+  ({ file: 'Cargo.lock', pkg: 'time@0.1.43', name: 'time', version: '0.1.43', cve, severity, ids: [cve] })
+
+test('gate rules: block fails, warn reports, unscanned blocks unless listed', () => {
+  const yml = parseFlatYaml('block:\n  - severity>=high\nwarn:\n  - severity >= medium\n  - incomplete\n')
+  const rules = gateRules({ block: yml.block as string[], warn: yml.warn as string[] }, 'any', false)
+  assert.deepEqual(rules.block.map(r => r.raw), ['severity>=high', 'unscanned'])
+  const hits = evaluateGate(rules, { findings: [finding('medium')], unscannedFiles: 0, partial: true })
+  assert.deepEqual(hits.map(h => [h.action, h.rule]), [['warn', 'severity >= medium'], ['warn', 'incomplete']])
+  assert.equal(evaluateGate(rules, { findings: [finding('critical')], unscannedFiles: 1, partial: false }).filter(h => h.action === 'block').length, 2)
+
+  // No list in the yml: the fail-on inputs, as before.
+  assert.deepEqual(gateRules({}, 'none', true).block.map(r => r.raw), ['incomplete', 'unscanned'])
+  assert.equal(evaluateGate(gateRules({}, 'any', false), { findings: [finding('unknown')], unscannedFiles: 0, partial: false }).length, 1)
+  // Listing unscanned as warn keeps it out of block.
+  assert.deepEqual(gateRules({ warn: ['unscanned'] }, 'any', false).block, [])
+  assert.throws(() => parseRule('severity>=hihg'), /Unknown gate rule/)
+  assert.throws(() => parseRule('kev-typo'), /Unknown gate rule/)
 })
