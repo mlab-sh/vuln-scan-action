@@ -107,8 +107,29 @@ warn:
 | Rule | Fires when |
 | --- | --- |
 | `severity>=<any\|low\|medium\|high\|critical>` | a finding is at or above that severity |
+| `kev` | a finding's CVE is in CISA KEV or the EU KEV: exploited in the wild |
+| `epss>=<0..1>` | a finding's EPSS (probability of exploitation in 30 days) is at least that, e.g. `epss>=0.1` |
+| `actor` | a threat actor is documented exploiting a finding's CVE ([actors.mlab.sh](https://actors.mlab.sh)) |
 | `unscanned` | a lockfile could not be scanned at all |
 | `incomplete` | some package of a scanned lockfile was not checked (package limit, git or path dependency, outage) |
+
+Gate on real exploitation rather than CVSS alone, e.g. block what is being
+exploited and warn on the rest:
+
+```yaml
+block:
+  - kev
+  - epss>=0.1
+  - actor
+warn:
+  - severity>=high
+```
+
+`kev`, `epss` and `actor` look each CVE up on the public
+[vuln.mlab.sh CVE API](https://vuln.mlab.sh/api) and actors.mlab.sh (only the
+CVE id is sent, no quota), and only when a rule needs it. A CVE that could not
+be looked up is reported as a warning and does not match. The job summary shows
+KEV, EPSS and actors next to each finding.
 
 When the file has a `block:` or `warn:` list, the rules replace the `fail-on`
 and `fail-on-incomplete` inputs. `unscanned` blocks unless one of the lists names

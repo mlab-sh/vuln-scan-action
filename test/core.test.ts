@@ -1,7 +1,7 @@
 // node --test test/*.test.ts (Node 24+ runs TypeScript by stripping types)
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cveOf, errorFor, evaluateGate, findingsOf, gateRules, isIgnored, locateLine, parseRule, scoreOf, severityOf, toSarif, KNOWN, THRESHOLDS } from '../src/core.ts'
+import { cveOf, errorFor, evaluateGate, findingsOf, gateRules, isIgnored, locateLine, intelNeeded, intelOf, parseRule, scoreOf, severityOf, toSarif, KNOWN, THRESHOLDS } from '../src/core.ts'
 import type { Finding } from '../src/core.ts'
 import { parseFlatYaml } from '../src/vulnYml.ts'
 
@@ -114,4 +114,20 @@ test('SARIF: one rule per advisory, a result per finding on its line', () => {
   assert.deepEqual(run.results.map((r: any) => r.level), ['error', 'note', 'error'])
   assert.equal(run.results[2].locations[0].physicalLocation.artifactLocation.uri, 'sub/Cargo.lock')
   assert.equal(run.results[0].locations[0].physicalLocation.region.startLine, 3)
+})
+
+test('exploitation rules: kev, epss and actor read the intel, missing intel never matches', () => {
+  const intel = intelOf({ id: 'CVE-2024-0001', in_kev: false, in_eu_kev: true, epss_score: 0.42 }, { actors: [{ primary_name: 'APT28' }] })
+  assert.deepEqual(intel, { kev: true, epss: 0.42, actors: ['APT28'] })
+  assert.equal(intelOf({ error: 'not found' }), undefined)
+  assert.equal(intelOf({ id: 'CVE-1', epss_score: null })?.epss, undefined)
+
+  const rules = gateRules({ block: ['kev', 'epss>=0.5', 'actor'] }, 'any', false)
+  assert.deepEqual(intelNeeded(rules), { cve: true, actors: true })
+  assert.deepEqual(intelNeeded(gateRules({}, 'high', false)), { cve: false, actors: false })
+  const fired = (f: Finding) => evaluateGate(rules, { findings: [f], unscannedFiles: 0, partial: false }).map(h => h.rule)
+  assert.deepEqual(fired({ ...finding('low'), intel }), ['kev', 'actor'])
+  assert.deepEqual(fired({ ...finding('low'), intel: { kev: false, epss: 0.5, actors: [] } }), ['epss>=0.5'])
+  assert.deepEqual(fired(finding('critical')), [])
+  assert.throws(() => parseRule('epss>=12'), /Unknown gate rule/)
 })

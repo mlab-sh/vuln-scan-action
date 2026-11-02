@@ -4,7 +4,7 @@ import * as path from 'node:path'
 import * as zlib from 'node:zlib'
 import {
   Finding, GateHit, KNOWN, Refusal, ScanRefused, ScanResponse, SEV_RANK, SEVERITIES, Upgrade,
-  errorFor, evaluateGate, findingsOf, gateRules, isIgnored, locateLine, toSarif,
+  errorFor, evaluateGate, findingsOf, gateRules, intelNeeded, intelOf, isIgnored, locateLine, toSarif,
 } from './core'
 import { loadVulnYml } from './vulnYml'
 
@@ -166,6 +166,49 @@ function list(items: string[]): string {
   return items.slice(0, 10).join(', ') + (items.length > 10 ? `, and ${items.length - 10} more` : '')
 }
 
+// ── Exploitation intel ───────────────────────────────────────────────────────
+// Public, unauthenticated, no scan quota; only a CVE id is sent. A lookup that
+// fails leaves the finding without intel: it is reported, never a crash.
+
+const ACTORS_ORIGIN = 'https://actors.mlab.sh'
+
+async function getJson(url: string): Promise<unknown> {
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(15_000) })
+    return resp.ok ? await resp.json() : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Attach intel to every finding with a CVE id, 6 lookups at a time. Returns the CVEs that could not be looked up. */
+async function enrich(findings: Finding[], vulnOrigin: string, withActors: boolean): Promise<string[]> {
+  const queue = [...new Set(findings.map(f => f.cve).filter(id => /^CVE-\d{4}-\d{4,}$/.test(id)))]
+  const intel = new Map<string, ReturnType<typeof intelOf>>()
+  const worker = async () => {
+    for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
+      const [cve, actors] = await Promise.all([
+        getJson(`${vulnOrigin}/api/v1/cve/${id}`),
+        withActors ? getJson(`${ACTORS_ORIGIN}/api/v1/cves/${id}/actors`) : undefined,
+      ])
+      intel.set(id, intelOf(cve, actors))
+    }
+  }
+  await Promise.all(Array.from({ length: 6 }, worker))
+  for (const f of findings) f.intel = intel.get(f.cve)
+  return [...intel].filter(([, v]) => !v).map(([id]) => id)
+}
+
+function exploitation(f: Finding): string {
+  if (!f.intel) return ''
+  const parts = [
+    ...(f.intel.kev ? ['KEV'] : []),
+    ...(f.intel.epss !== undefined ? [`EPSS ${(f.intel.epss * 100).toFixed(f.intel.epss >= 0.1 ? 0 : 2)}%`] : []),
+    ...(f.intel.actors?.length ? [f.intel.actors.slice(0, 3).join(', ')] : []),
+  ]
+  return parts.join(' · ')
+}
+
 // ── Report ───────────────────────────────────────────────────────────────────
 
 const ICON: Record<string, string> = { critical: '🔴', high: '🟠', medium: '🟡', low: '🔵', unknown: '⚪' }
@@ -209,9 +252,9 @@ function writeSummary(s: Session, all: Finding[], reports: FileReport[], counts:
     const rows = [...all]
       .sort((a, b) => SEV_RANK[b.severity] - SEV_RANK[a.severity])
       .slice(0, 100)
-      .map(f => [`${ICON[f.severity]} ${f.severity}`, f.pkg, f.cve, f.fixed ?? '', f.file])
+      .map(f => [`${ICON[f.severity]} ${f.severity}`, f.pkg, f.cve, exploitation(f), f.fixed ?? '', f.file])
     sum.addTable([
-      [{ data: 'Severity', header: true }, { data: 'Package', header: true }, { data: 'Advisory', header: true }, { data: 'Fixed in', header: true }, { data: 'Lockfile', header: true }],
+      [{ data: 'Severity', header: true }, { data: 'Package', header: true }, { data: 'Advisory', header: true }, { data: 'Exploitation', header: true }, { data: 'Fixed in', header: true }, { data: 'Lockfile', header: true }],
       ...rows,
     ])
     if (all.length > 100) sum.addRaw(`…and ${all.length - 100} more.`).addBreak()
@@ -306,6 +349,12 @@ async function run(): Promise<void> {
   const all = reports.flatMap(r => r.findings)
   const counts: Record<string, number> = { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 }
   for (const f of all) counts[f.severity]++
+
+  const need = intelNeeded(rules)
+  if (need.cve && all.length) {
+    const missing = await enrich(all, new URL(session.apiUrl).origin, need.actors)
+    if (missing.length) core.warning(`Exploitation data unavailable for ${missing.length} CVE(s), not matched by kev / epss / actor rules: ${list(missing)}`)
+  }
 
   // Annotations land on the lockfile line that declares the package, worst first.
   const texts = new Map(reports.map(r => [r.file, r.text]))

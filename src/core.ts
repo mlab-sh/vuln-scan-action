@@ -181,6 +181,30 @@ export interface Finding {
   ids: string[]
   fixed?: string
   summary?: string
+  /** Exploitation data, fetched only when a gate rule needs it. */
+  intel?: Intel
+}
+
+/** What is known of a CVE's exploitation in the wild. */
+export interface Intel {
+  /** Listed in CISA KEV or the EU equivalent. */
+  kev: boolean
+  /** Probability of exploitation in the next 30 days, 0 to 1. */
+  epss?: number
+  /** Threat actors documented exploiting it; undefined when not looked up. */
+  actors?: string[]
+}
+
+/** Intel out of a vuln.mlab.sh `/api/v1/cve/{id}` record and an actors.mlab.sh `/api/v1/cves/{id}/actors` body. */
+export function intelOf(cve: unknown, actors?: unknown): Intel | undefined {
+  if (!cve || typeof cve !== 'object' || typeof (cve as { id?: unknown }).id !== 'string') return undefined
+  const c = cve as { in_kev?: unknown; in_eu_kev?: unknown; epss_score?: unknown }
+  const list = (actors as { actors?: Array<{ primary_name?: unknown }> } | undefined)?.actors
+  return {
+    kev: c.in_kev === true || c.in_eu_kev === true,
+    epss: typeof c.epss_score === 'number' && Number.isFinite(c.epss_score) ? c.epss_score : undefined,
+    actors: Array.isArray(list) ? list.map(a => a.primary_name).filter((n): n is string => typeof n === 'string') : undefined,
+  }
 }
 
 /**
@@ -231,7 +255,7 @@ export type GateAction = 'block' | 'warn'
 
 export interface Rule {
   raw: string
-  kind: 'severity' | 'unscanned' | 'incomplete'
+  kind: 'severity' | 'unscanned' | 'incomplete' | 'kev' | 'epss' | 'actor'
   value?: number
 }
 
@@ -254,20 +278,38 @@ export function parseRule(raw: string): Rule {
   const s = raw.trim().toLowerCase().replace(/\s+/g, '')
   const sev = /^severity>=(\w+)$/.exec(s)
   if (sev && THRESHOLDS[sev[1]] !== undefined && THRESHOLDS[sev[1]] !== Infinity) return { raw, kind: 'severity', value: THRESHOLDS[sev[1]] }
-  if (s === 'unscanned' || s === 'incomplete') return { raw, kind: s }
-  throw new Error(`Unknown gate rule '${raw}'. Expected severity>=<any|low|medium|high|critical>, unscanned or incomplete.`)
+  const epss = /^epss>=(\d*\.?\d+)$/.exec(s)
+  if (epss && Number(epss[1]) <= 1) return { raw, kind: 'epss', value: Number(epss[1]) }
+  if (s === 'unscanned' || s === 'incomplete' || s === 'kev' || s === 'actor') return { raw, kind: s }
+  throw new Error(`Unknown gate rule '${raw}'. Expected severity>=<any|low|medium|high|critical>, kev, epss>=<0..1>, actor, unscanned or incomplete.`)
+}
+
+/** Which lookups the rules need: CVE intel (KEV, EPSS) and threat actors. */
+export function intelNeeded(rules: Record<GateAction, Rule[]>): { cve: boolean; actors: boolean } {
+  const kinds = new Set([...rules.block, ...rules.warn].map(r => r.kind))
+  return { cve: kinds.has('kev') || kinds.has('epss') || kinds.has('actor'), actors: kinds.has('actor') }
+}
+
+const FINDING_TEST: Partial<Record<Rule['kind'], (f: Finding, r: Rule) => boolean>> = {
+  severity: (f, r) => SEV_RANK[f.severity] >= r.value!,
+  kev: f => f.intel?.kev === true,
+  epss: (f, r) => (f.intel?.epss ?? -1) >= r.value!,
+  actor: f => (f.intel?.actors?.length ?? 0) > 0,
 }
 
 function reasonFor(r: Rule, input: GateInput): string | undefined {
+  const test = FINDING_TEST[r.kind]
+  if (test) {
+    const matched = input.findings.filter(f => test(f, r))
+    return matched.length ? `${matched.length} finding(s) match ${r.raw}: ${[...new Set(matched.map(f => f.cve))].slice(0, 5).join(', ')}` : undefined
+  }
   switch (r.kind) {
-    case 'severity': {
-      const n = input.findings.filter(f => SEV_RANK[f.severity] >= r.value!).length
-      return n ? `${n} finding(s) match ${r.raw}` : undefined
-    }
     case 'unscanned':
       return input.unscannedFiles ? `${input.unscannedFiles} lockfile(s) could not be scanned` : undefined
     case 'incomplete':
       return input.partial ? 'the scan did not cover every package' : undefined
+    default:
+      return undefined
   }
 }
 

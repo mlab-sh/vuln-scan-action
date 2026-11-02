@@ -8,6 +8,10 @@
   (`severity>=high`, `unscanned`, `incomplete`), and `mode: notify` to never
   fail. Fired rules are listed in the job summary. Without lists, `fail-on`
   and `fail-on-incomplete` behave as before.
+- **Exploitation gate rules**: `kev` (CISA or EU KEV), `epss>=<0..1>` and
+  `actor` (a threat actor exploits the CVE), from the public vuln.mlab.sh and
+  actors.mlab.sh APIs, looked up only when a rule needs them. The job summary
+  gets an Exploitation column.
 - **SARIF and GitHub Code Scanning**: `sarif-file` writes the findings as SARIF
   2.1.0, `upload-sarif: true` uploads them to the Security tab (needs
   `security-events: write`). Output `sarif-file`.
