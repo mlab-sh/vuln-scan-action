@@ -1,0 +1,11 @@
+# .mlab/vuln.yml: block high and critical, warn on the rest.
+block:
+  - severity>=high
+warn:
+  - severity>=low
+  - incomplete
+
+# Accepted as known risk: not reported, never fail. Matched on every alias.
+ignoreVulns:
+  - CVE-2024-0000         # not reachable: only used in tests
+  - GHSA-xxxx-xxxx-xxxx

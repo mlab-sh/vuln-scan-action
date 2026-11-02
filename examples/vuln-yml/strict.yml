@@ -1,0 +1,10 @@
+# .mlab/vuln.yml: production services. Everything at medium or above blocks,
+# and so does a scan that did not cover every package.
+block:
+  - severity>=medium
+  - kev
+  - score<80
+  - incomplete
+  - unscanned
+warn:
+  - severity>=low

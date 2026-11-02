@@ -1,0 +1,38 @@
+# Everything together. Gate rules live in .mlab/vuln.yml
+# (see examples/vuln-yml/exploit-first.yml).
+#   pull requests: gate + Code Scanning alerts
+#   main:          same, plus monitoring and the badge
+#   weekly:        rescan for CVEs published since
+name: SBOM
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # commit the badge on main
+      security-events: write   # upload-sarif
+    steps:
+      - uses: actions/checkout@v4
+      - id: scan
+        uses: mlab-sh/vuln-scan-action@v1
+        with:
+          upload-sarif: "true"
+          monitor: ${{ github.event_name == 'push' }}
+          badge-file: ${{ github.event_name != 'pull_request' && '.github/badges/vulns.svg' || '' }}
+          token: ${{ secrets.VULN_MLAB_TOKEN }}
+      - name: Commit the badge
+        if: always() && github.event_name != 'pull_request' && steps.scan.outputs.score != ''
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/badges/vulns.svg
+          git diff --cached --quiet || (git commit -m "update vulnerability badge [skip ci]" && git push)

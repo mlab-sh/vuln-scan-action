@@ -1,0 +1,31 @@
+# Sign the scan result and bind it to the release artifact (Sigstore, GitHub
+# Artifact Attestations). Verify with:
+#   gh attestation verify dist/app.tar.gz --repo <owner>/<repo> \
+#     --predicate-type https://in-toto.io/attestation/vulns/v0.1
+name: Release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make dist/app.tar.gz   # your build
+      - id: scan
+        uses: mlab-sh/vuln-scan-action@v1
+        with:
+          fail-on: critical
+          attestation-predicate: ${{ runner.temp }}/vulns.json
+          token: ${{ secrets.VULN_MLAB_TOKEN }}
+      - uses: actions/attest@v2
+        with:
+          subject-path: dist/app.tar.gz
+          predicate-type: ${{ steps.scan.outputs.attestation-predicate-type }}
+          predicate-path: ${{ steps.scan.outputs.attestation-predicate }}

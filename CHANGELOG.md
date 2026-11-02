@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Docs
+
+- README reorganised: gate rules, every input and output, a permissions table,
+  one section per integration.
+- `examples/`: ready-to-copy workflows (basic, report-only, monorepo, Code
+  Scanning, badge, monitoring, attestation, complete) and `.mlab/vuln.yml`
+  policies (severity gate, exploit-first, strict, notify, disabled).
+
 ## v1.2.0 - 2026-11-02
 
 Gate rules, exploitation data, and what to do with a scan beyond the job log.

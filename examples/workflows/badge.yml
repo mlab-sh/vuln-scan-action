@@ -1,0 +1,28 @@
+# Keep a score badge in the repo, refreshed on every push to main and weekly.
+# README: ![vulnerabilities](.github/badges/vulns.svg)
+name: SBOM badge
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: write
+
+jobs:
+  badge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlab-sh/vuln-scan-action@v1
+        with:
+          badge-file: .github/badges/vulns.svg
+          soft-fail: "true"
+          token: ${{ secrets.VULN_MLAB_TOKEN }}
+      - name: Commit the badge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/badges/vulns.svg
+          git diff --cached --quiet || (git commit -m "update vulnerability badge [skip ci]" && git push)

@@ -1,0 +1,9 @@
+# .mlab/vuln.yml: rolling the gate out. Every rule is reported in the job
+# summary and as a warning, none fails the build. Switch `mode` to `gate`
+# (or delete the line) once the backlog is triaged.
+mode: notify
+block:
+  - severity>=high
+  - kev
+warn:
+  - severity>=medium

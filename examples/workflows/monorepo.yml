@@ -1,0 +1,33 @@
+# Several lockfiles, listed explicitly (or leave `path` empty to auto-detect
+# under `working-directory`).
+name: SBOM scan
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlab-sh/vuln-scan-action@v1
+        with:
+          path: |
+            frontend/package-lock.json
+            backend/go.sum
+            infra/requirements.txt
+            sbom/bom.cdx.json
+          fail-on: high
+          fail-on-incomplete: "true"
+          token: ${{ secrets.VULN_MLAB_TOKEN }}
+
+  # One service only, auto-detecting its lockfiles.
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlab-sh/vuln-scan-action@v1
+        with:
+          working-directory: services/api
+          token: ${{ secrets.VULN_MLAB_TOKEN }}

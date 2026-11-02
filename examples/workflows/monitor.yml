@@ -1,0 +1,23 @@
+# Register the lockfiles on vuln.mlab.sh (Pro plan): mlab rescans them from
+# the branch tip and alerts on new CVEs. Runs on pushes to the default branch
+# only; other events skip the registration.
+name: SBOM monitoring
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlab-sh/vuln-scan-action@v1
+        with:
+          monitor: "true"
+          soft-fail: "true"
+          token: ${{ secrets.VULN_MLAB_TOKEN }}
+          # Private repository: a fine-grained token, contents:read on this repo.
+          # monitor-source-token: ${{ secrets.MLAB_MONITOR_READ_TOKEN }}

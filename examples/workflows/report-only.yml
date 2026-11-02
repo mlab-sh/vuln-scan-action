@@ -1,0 +1,24 @@
+# Never fail the build: report, then decide yourself from the outputs.
+name: SBOM report
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: scan
+        uses: mlab-sh/vuln-scan-action@v1
+        with:
+          soft-fail: "true"
+          token: ${{ secrets.VULN_MLAB_TOKEN }}
+      - name: Use the outputs
+        run: |
+          echo "total=${{ steps.scan.outputs.total }} critical=${{ steps.scan.outputs.critical }} high=${{ steps.scan.outputs.high }}"
+          echo "score=${{ steps.scan.outputs.score }} incomplete=${{ steps.scan.outputs.incomplete }} failed=${{ steps.scan.outputs.failed }}"
+      - name: Fail only on criticals in a release branch
+        if: startsWith(github.ref, 'refs/heads/release/') && steps.scan.outputs.critical != '0'
+        run: exit 1

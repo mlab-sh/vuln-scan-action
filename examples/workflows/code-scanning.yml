@@ -1,0 +1,25 @@
+# Findings as alerts in the Security tab. The weekly run catches CVEs published
+# after your last push. Private repos need GitHub Advanced Security; a refused
+# upload is a warning, not a failed scan.
+name: SBOM code scanning
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlab-sh/vuln-scan-action@v1
+        with:
+          upload-sarif: "true"
+          soft-fail: "true"   # the alerts are the report; drop this to also gate
+          token: ${{ secrets.VULN_MLAB_TOKEN }}

@@ -1,0 +1,17 @@
+# Scan every push and pull request, fail on high or critical.
+# Copy to .github/workflows/sbom.yml.
+name: SBOM scan
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlab-sh/vuln-scan-action@v1
+        with:
+          fail-on: high
+          token: ${{ secrets.VULN_MLAB_TOKEN }}

@@ -1,0 +1,2 @@
+# .mlab/vuln.yml: skip the scan in this repository (archived, vendored copy...).
+disable: true
