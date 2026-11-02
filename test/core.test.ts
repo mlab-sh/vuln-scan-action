@@ -1,7 +1,7 @@
 // node --test test/*.test.ts (Node 24+ runs TypeScript by stripping types)
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cveOf, errorFor, evaluateGate, findingsOf, gateRules, isIgnored, locateLine, intelNeeded, intelOf, parseRule, scoreOf, severityOf, toSarif, KNOWN, THRESHOLDS } from '../src/core.ts'
+import { cveOf, errorFor, evaluateGate, findingsOf, gateRules, isIgnored, locateLine, intelNeeded, intelOf, monitorBranch, parseRule, rawUrl, scoreOf, severityOf, toSarif, KNOWN, THRESHOLDS } from '../src/core.ts'
 import type { Finding } from '../src/core.ts'
 import { parseFlatYaml } from '../src/vulnYml.ts'
 
@@ -130,4 +130,14 @@ test('exploitation rules: kev, epss and actor read the intel, missing intel neve
   assert.deepEqual(fired({ ...finding('low'), intel: { kev: false, epss: 0.5, actors: [] } }), ['epss>=0.5'])
   assert.deepEqual(fired(finding('critical')), [])
   assert.throws(() => parseRule('epss>=12'), /Unknown gate rule/)
+})
+
+test('monitoring: only a push to the default branch, from the branch tip', () => {
+  const event = { repository: { default_branch: 'main' } }
+  assert.deepEqual(monitorBranch({ GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/main' }, event), { branch: 'main' })
+  assert.match(monitorBranch({ GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/feat' }, event).skip!, /not the default branch/)
+  assert.match(monitorBranch({ GITHUB_EVENT_NAME: 'pull_request', GITHUB_REF: 'refs/pull/1/merge' }, event).skip!, /not a push/)
+  assert.match(monitorBranch({ GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/main' }, undefined).skip!, /unknown/)
+  assert.equal(rawUrl('mlab-sh/app', 'release/1', 'sub dir\\Cargo.lock'),
+    'https://raw.githubusercontent.com/mlab-sh/app/release%2F1/sub%20dir/Cargo.lock')
 })

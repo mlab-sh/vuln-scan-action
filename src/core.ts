@@ -391,6 +391,29 @@ export function toSarif(findings: Finding[], lineOf: (f: Finding) => number): ob
   }
 }
 
+// ── SBOM monitoring ──────────────────────────────────────────────────────────
+
+/**
+ * The branch to monitor when this run is a push to the repository's default
+ * branch, else why not: monitoring follows what ships, not every PR.
+ */
+export function monitorBranch(
+  env: { GITHUB_EVENT_NAME?: string; GITHUB_REF?: string },
+  event: { repository?: { default_branch?: string } } | undefined,
+): { branch?: string; skip?: string } {
+  const def = event?.repository?.default_branch
+  if (env.GITHUB_EVENT_NAME !== 'push') return { skip: `the event is '${env.GITHUB_EVENT_NAME ?? 'unknown'}', not a push` }
+  if (!def) return { skip: 'the default branch is unknown' }
+  if (env.GITHUB_REF !== `refs/heads/${def}`) return { skip: `${env.GITHUB_REF} is not the default branch (${def})` }
+  return { branch: def }
+}
+
+/** Where mlab fetches the lockfile from on each rescan: the tip of the branch, not this commit. */
+export function rawUrl(repo: string, branch: string, repoPath: string): string {
+  const p = repoPath.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/')
+  return `https://raw.githubusercontent.com/${repo}/${encodeURIComponent(branch)}/${p}`
+}
+
 // ── Refusals ─────────────────────────────────────────────────────────────────
 
 export type RefusalKind = 'cooldown' | 'too-large' | 'auth' | 'unparseable' | 'http'

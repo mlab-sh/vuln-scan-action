@@ -60,6 +60,8 @@ scans land in your history on vuln.mlab.sh.
 | `api-url` | `https://vuln.mlab.sh/api/v2/scan` | Override the scan endpoint. |
 | `sarif-file` | *(none)* | Write the findings as SARIF 2.1.0 to this path. |
 | `upload-sarif` | `false` | If `true`, upload the SARIF to GitHub Code Scanning (needs `security-events: write`). |
+| `monitor` | `false` | If `true`, on a push to the default branch, register the lockfiles on vuln.mlab.sh for continuous monitoring (Pro plan). |
+| `monitor-source-token` | *(none)* | Private repo only: a read-only token mlab uses to fetch the lockfiles on each rescan. |
 | `github-token` | `${{ github.token }}` | Token for the GitHub API (SARIF upload). |
 
 **Auto-detected lockfiles:** `Cargo.lock`, `package-lock.json`,
@@ -201,6 +203,32 @@ ranked by severity; alerts close when the dependency is upgraded. Code scanning
 on a private repository needs GitHub Advanced Security; a refused upload is a
 warning, not a failed scan. To upload with `github/codeql-action/upload-sarif`
 instead, set `sarif-file` and pass that path to it.
+
+**Continuous monitoring on vuln.mlab.sh:**
+
+A scan in CI only sees CVEs published before the build. With `monitor: true`,
+a push to the default branch registers each scanned lockfile as a monitored
+project on [vuln.mlab.sh/me/sbom](https://vuln.mlab.sh/me/sbom): mlab refetches
+it from the branch tip, rescans it on schedule and alerts you when a new CVE
+lands on a dependency you already ship. Lockfiles already monitored get a rescan,
+not a duplicate. Other events (pull requests, other branches) skip this step.
+
+```yaml
+on:
+  push:
+    branches: [main]
+steps:
+  - uses: actions/checkout@v4
+  - uses: mlab-sh/vuln-scan-action@v1
+    with:
+      monitor: "true"
+      token: ${{ secrets.VULN_MLAB_TOKEN }}
+      # private repository only: a fine-grained token with contents:read
+      # monitor-source-token: ${{ secrets.MLAB_MONITOR_READ_TOKEN }}
+```
+
+Monitoring is a Pro feature; a refusal (plan, project limit) is a warning and
+never fails the build.
 
 ## How it works
 

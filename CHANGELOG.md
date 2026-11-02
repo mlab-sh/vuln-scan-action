@@ -12,6 +12,9 @@
   `actor` (a threat actor exploits the CVE), from the public vuln.mlab.sh and
   actors.mlab.sh APIs, looked up only when a rule needs them. The job summary
   gets an Exploitation column.
+- **Continuous SBOM monitoring**: `monitor: true` registers the scanned
+  lockfiles on vuln.mlab.sh (Pro plan) on a push to the default branch, or asks
+  for a rescan when already monitored. `monitor-source-token` for private repos.
 - **SARIF and GitHub Code Scanning**: `sarif-file` writes the findings as SARIF
   2.1.0, `upload-sarif: true` uploads them to the Security tab (needs
   `security-events: write`). Output `sarif-file`.

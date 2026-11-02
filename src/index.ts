@@ -4,7 +4,7 @@ import * as path from 'node:path'
 import * as zlib from 'node:zlib'
 import {
   Finding, GateHit, KNOWN, Refusal, ScanRefused, ScanResponse, SEV_RANK, SEVERITIES, Upgrade,
-  errorFor, evaluateGate, findingsOf, gateRules, intelNeeded, intelOf, isIgnored, locateLine, toSarif,
+  errorFor, evaluateGate, findingsOf, gateRules, intelNeeded, intelOf, isIgnored, locateLine, monitorBranch, rawUrl, toSarif,
 } from './core'
 import { loadVulnYml } from './vulnYml'
 
@@ -164,6 +164,55 @@ async function scanFile(s: Session, file: string): Promise<FileReport> {
 
 function list(items: string[]): string {
   return items.slice(0, 10).join(', ') + (items.length > 10 ? `, and ${items.length - 10} more` : '')
+}
+
+// ── SBOM monitoring ──────────────────────────────────────────────────────────
+// Registers each lockfile as a monitored project on vuln.mlab.sh (Pro plan),
+// which rescans it from the branch tip and alerts on new CVEs. Known projects
+// (same source URL) get a rescan instead of a duplicate. Never fails the build.
+
+async function monitor(s: Session, files: string[], sourceToken: string): Promise<void> {
+  if (!s.token) { core.warning('monitor: needs the `token` input (a vuln.mlab.sh account on a Pro plan), skipped.'); return }
+  const repo = process.env.GITHUB_REPOSITORY
+  let event: Parameters<typeof monitorBranch>[1]
+  try { event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH ?? '', 'utf8')) } catch { event = undefined }
+  const { branch, skip } = monitorBranch(process.env, event)
+  if (!repo || !branch) { core.info(`monitor: skipped, ${skip ?? 'GITHUB_REPOSITORY is unset'}.`); return }
+  if ((event as { repository?: { private?: boolean } })?.repository?.private && !sourceToken) {
+    core.warning('monitor: the repository is private, so mlab cannot fetch its lockfiles. Set `monitor-source-token` (a read-only token for this repo), skipped.')
+    return
+  }
+
+  const api = new URL('/api/v1/sbom', s.apiUrl).toString()
+  const headers = { Authorization: `Bearer ${s.token}`, 'Content-Type': 'application/json' }
+  const call = async (method: string, url: string, body?: object) => {
+    const resp = await fetch(url, { method, headers, body: body && JSON.stringify(body), signal: AbortSignal.timeout(30_000) })
+    const json = (await resp.json().catch(() => ({}))) as { message?: string; error?: string; projects?: Array<{ id: string; source_url: string }> }
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}${json.message ? `: ${json.message}` : json.error ? `: ${json.error}` : ''}`)
+    return json
+  }
+
+  try {
+    const known = new Map(((await call('GET', api)).projects ?? []).map(p => [p.source_url, p.id]))
+    const root = process.env.GITHUB_WORKSPACE || process.cwd()
+    for (const file of files) {
+      const rel = path.relative(root, file)
+      const url = rawUrl(repo, branch, rel)
+      const id = known.get(url)
+      if (id) {
+        await call('POST', `${api}/${encodeURIComponent(id)}/scan`)
+        core.info(`monitor: ${rel} already monitored, rescan requested.`)
+      } else {
+        await call('POST', api, {
+          name: `${repo}/${rel}`, source_url: url, format: s.format !== 'auto' ? s.format : (KNOWN[path.basename(file).toLowerCase()] ?? 'auto'),
+          ...(sourceToken ? { auth_header: `Authorization: Bearer ${sourceToken}` } : {}),
+        })
+        core.info(`monitor: ${rel} is now monitored on vuln.mlab.sh.`)
+      }
+    }
+  } catch (err) {
+    core.warning(`monitor: could not register the SBOM on vuln.mlab.sh (${err instanceof Error ? err.message : String(err)}). Continuous monitoring is a Pro feature: https://vuln.mlab.sh/me/sbom`)
+  }
 }
 
 // ── Exploitation intel ───────────────────────────────────────────────────────
@@ -377,6 +426,10 @@ async function run(): Promise<void> {
     fs.writeFileSync(sarifFile, JSON.stringify(toSarif(all, lineOf), null, 2))
     core.setOutput('sarif-file', sarifFile)
     if (uploadSarifOn) await uploadSarif(sarifFile, core.getInput('github-token'))
+  }
+
+  if (core.getBooleanInput('monitor')) {
+    await monitor(session, files.filter((_, n) => !reports[n].error), core.getInput('monitor-source-token'))
   }
 
   const incomplete = reports.some(r => r.error || r.gaps.length)

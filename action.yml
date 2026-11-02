@@ -62,6 +62,20 @@ inputs:
       `permissions: security-events: write`; code scanning must be available on the repo.
     required: false
     default: "false"
+  monitor:
+    description: >
+      If 'true', on a push to the default branch, register each scanned lockfile on
+      vuln.mlab.sh for continuous monitoring (rescanned from the branch tip, alerts on
+      new CVEs). Needs `token` from an account on a Pro plan. Never fails the build.
+    required: false
+    default: "false"
+  monitor-source-token:
+    description: >
+      For a private repository: a read-only token mlab sends to fetch the lockfiles on
+      each rescan (raw.githubusercontent.com). Stored by vuln.mlab.sh; use a fine-grained,
+      contents:read token, not GITHUB_TOKEN (it expires with the job).
+    required: false
+    default: ""
   github-token:
     description: "Token for the GitHub API (SARIF upload)."
     required: false
