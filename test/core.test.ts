@@ -1,7 +1,7 @@
 // node --test test/*.test.ts (Node 24+ runs TypeScript by stripping types)
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cveOf, errorFor, evaluateGate, findingsOf, gateRules, isIgnored, locateLine, parseRule, scoreOf, severityOf, KNOWN, THRESHOLDS } from '../src/core.ts'
+import { cveOf, errorFor, evaluateGate, findingsOf, gateRules, isIgnored, locateLine, parseRule, scoreOf, severityOf, toSarif, KNOWN, THRESHOLDS } from '../src/core.ts'
 import type { Finding } from '../src/core.ts'
 import { parseFlatYaml } from '../src/vulnYml.ts'
 
@@ -102,4 +102,16 @@ test('gate rules: block fails, warn reports, unscanned blocks unless listed', ()
   assert.deepEqual(gateRules({ warn: ['unscanned'] }, 'any', false).block, [])
   assert.throws(() => parseRule('severity>=hihg'), /Unknown gate rule/)
   assert.throws(() => parseRule('kev-typo'), /Unknown gate rule/)
+})
+
+test('SARIF: one rule per advisory, a result per finding on its line', () => {
+  const log = toSarif([finding('high'), { ...finding('low', 'GHSA-abcd'), pkg: 'serde@1.0.0' }, { ...finding('high'), file: 'sub\\Cargo.lock' }], () => 3) as any
+  const run = log.runs[0]
+  assert.equal(log.version, '2.1.0')
+  assert.deepEqual(run.tool.driver.rules.map((r: any) => r.id), ['CVE-2024-0001', 'GHSA-abcd'])
+  assert.equal(run.tool.driver.rules[0].properties['security-severity'], '8.0')
+  assert.equal(run.tool.driver.rules[1].helpUri, 'https://osv.dev/vulnerability/GHSA-abcd')
+  assert.deepEqual(run.results.map((r: any) => r.level), ['error', 'note', 'error'])
+  assert.equal(run.results[2].locations[0].physicalLocation.artifactLocation.uri, 'sub/Cargo.lock')
+  assert.equal(run.results[0].locations[0].physicalLocation.region.startLine, 3)
 })

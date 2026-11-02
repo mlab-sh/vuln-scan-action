@@ -52,6 +52,20 @@ inputs:
     description: "Scan endpoint."
     required: false
     default: "https://vuln.mlab.sh/api/v2/scan"
+  sarif-file:
+    description: "Write the findings as SARIF 2.1.0 to this path. Empty: no file, unless upload-sarif is set (then a temp file)."
+    required: false
+    default: ""
+  upload-sarif:
+    description: >
+      If 'true', upload the SARIF to GitHub Code Scanning (Security tab). Needs
+      `permissions: security-events: write`; code scanning must be available on the repo.
+    required: false
+    default: "false"
+  github-token:
+    description: "Token for the GitHub API (SARIF upload)."
+    required: false
+    default: ${{ github.token }}
 
 outputs:
   total:
@@ -74,6 +88,8 @@ outputs:
     description: "Number of packages left out because a manifest exceeded the package limit."
   failed:
     description: "'true' if a block gate rule fired (by default: fail-on threshold met, a lockfile could not be scanned, or incomplete with fail-on-incomplete), regardless of soft-fail."
+  sarif-file:
+    description: "Path of the SARIF file written, when one was."
 
 runs:
   using: "node24"

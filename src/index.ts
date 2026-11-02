@@ -1,9 +1,10 @@
 import * as core from '@actions/core'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import * as zlib from 'node:zlib'
 import {
   Finding, GateHit, KNOWN, Refusal, ScanRefused, ScanResponse, SEV_RANK, SEVERITIES, Upgrade,
-  errorFor, evaluateGate, findingsOf, gateRules, isIgnored, locateLine,
+  errorFor, evaluateGate, findingsOf, gateRules, isIgnored, locateLine, toSarif,
 } from './core'
 import { loadVulnYml } from './vulnYml'
 
@@ -219,6 +220,35 @@ function writeSummary(s: Session, all: Finding[], reports: FileReport[], counts:
   if (s.upgrade) sum.addRaw(`${s.upgrade.message} ${s.upgrade.url}`).addBreak()
 }
 
+// ── SARIF upload ─────────────────────────────────────────────────────────────
+
+/** POST the log to Code Scanning. Needs `security-events: write`; a refusal is a warning, not a failed scan. */
+async function uploadSarif(file: string, token: string): Promise<void> {
+  const repo = process.env.GITHUB_REPOSITORY
+  if (!repo || !process.env.GITHUB_SHA || !process.env.GITHUB_REF) {
+    core.warning('upload-sarif: not running in GitHub Actions (GITHUB_REPOSITORY, GITHUB_SHA or GITHUB_REF missing), skipped.')
+    return
+  }
+  const api = process.env.GITHUB_API_URL || 'https://api.github.com'
+  const resp = await fetch(`${api}/repos/${repo}/code-scanning/sarifs`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      commit_sha: process.env.GITHUB_SHA,
+      ref: process.env.GITHUB_REF,
+      sarif: zlib.gzipSync(fs.readFileSync(file)).toString('base64'),
+      tool_name: 'vuln.mlab.sh',
+    }),
+    signal: AbortSignal.timeout(60_000),
+  }).catch((err: unknown) => err as Error)
+  if (resp instanceof Error) { core.warning(`SARIF upload failed: ${resp.message}`); return }
+  if (resp.ok) { core.info(`SARIF uploaded to Code Scanning (${repo}).`); return }
+  const why = resp.status === 403 || resp.status === 404
+    ? ' Check `permissions: security-events: write`, and that code scanning is enabled (GitHub Advanced Security on a private repo).'
+    : ''
+  core.warning(`SARIF upload refused: HTTP ${resp.status} ${(await resp.text()).slice(0, 300)}.${why}`)
+}
+
 // ── Run ──────────────────────────────────────────────────────────────────────
 
 function setOutputs(o: Record<string, string | number | boolean>) {
@@ -279,8 +309,9 @@ async function run(): Promise<void> {
 
   // Annotations land on the lockfile line that declares the package, worst first.
   const texts = new Map(reports.map(r => [r.file, r.text]))
+  const lineOf = (f: Finding) => locateLine(texts.get(f.file) ?? '', f.name, f.version)
   for (const f of [...all].sort((a, b) => SEV_RANK[b.severity] - SEV_RANK[a.severity]).slice(0, ANNOTATION_LIMIT)) {
-    const props = { file: f.file, startLine: locateLine(texts.get(f.file) ?? '', f.name, f.version), title: `${f.cve} (${f.severity})` }
+    const props = { file: f.file, startLine: lineOf(f), title: `${f.cve} (${f.severity})` }
     const msg = `${f.pkg}: ${f.cve}${f.fixed ? `, fixed in ${f.fixed}` : ''}${f.summary ? `. ${f.summary}` : ''}`
     if (SEV_RANK[f.severity] >= SEV_RANK.high) core.error(msg, props); else core.warning(msg, props)
   }
@@ -290,6 +321,14 @@ async function run(): Promise<void> {
     for (const g of r.gaps) core.warning(`${r.file}: ${g}`, { file: r.file })
   }
   if (session.upgrade) core.notice(`${session.upgrade.message} ${session.upgrade.url}`)
+
+  const uploadSarifOn = core.getBooleanInput('upload-sarif')
+  const sarifFile = core.getInput('sarif-file') || (uploadSarifOn ? path.join(process.env.RUNNER_TEMP || '.', 'mlab-vuln.sarif') : '')
+  if (sarifFile) {
+    fs.writeFileSync(sarifFile, JSON.stringify(toSarif(all, lineOf), null, 2))
+    core.setOutput('sarif-file', sarifFile)
+    if (uploadSarifOn) await uploadSarif(sarifFile, core.getInput('github-token'))
+  }
 
   const incomplete = reports.some(r => r.error || r.gaps.length)
   const hits = evaluateGate(rules, {

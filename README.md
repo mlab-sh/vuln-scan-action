@@ -58,6 +58,9 @@ scans land in your history on vuln.mlab.sh.
 | `soft-fail` | `false` | If `true`, never fail the build: report findings and set outputs only. |
 | `token` | *(none)* | vuln.mlab.sh API token. Strongly recommended for CI. |
 | `api-url` | `https://vuln.mlab.sh/api/v2/scan` | Override the scan endpoint. |
+| `sarif-file` | *(none)* | Write the findings as SARIF 2.1.0 to this path. |
+| `upload-sarif` | `false` | If `true`, upload the SARIF to GitHub Code Scanning (needs `security-events: write`). |
+| `github-token` | `${{ github.token }}` | Token for the GitHub API (SARIF upload). |
 
 **Auto-detected lockfiles:** `Cargo.lock`, `package-lock.json`,
 `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `composer.lock`,
@@ -120,6 +123,7 @@ it. An unknown rule fails the run rather than leaving the gate open.
 | `critical`, `high`, `medium`, `low`, `unknown` | Findings per severity. |
 | `incomplete` | `true` if some package was not scanned (limit, unscannable entry, outage, or a lockfile that failed). |
 | `not-scanned` | Packages left out because a manifest exceeded the package limit. |
+| `sarif-file` | Path of the SARIF file written, when one was. |
 | `failed` | `true` if a `block` rule fired (by default: `fail-on` threshold met, a lockfile could not be scanned, or incomplete with `fail-on-incomplete`), regardless of `soft-fail`. |
 
 ## Examples
@@ -156,6 +160,26 @@ it. An unknown rule fails the run rather than leaving the gate open.
       infra/requirements.txt
     token: ${{ secrets.VULN_MLAB_TOKEN }}
 ```
+
+**Findings in the Security tab (GitHub Code Scanning):**
+
+```yaml
+permissions:
+  contents: read
+  security-events: write
+steps:
+  - uses: actions/checkout@v4
+  - uses: mlab-sh/vuln-scan-action@v1
+    with:
+      upload-sarif: "true"
+      token: ${{ secrets.VULN_MLAB_TOKEN }}
+```
+
+Each finding becomes an alert on the lockfile line that declares the package,
+ranked by severity; alerts close when the dependency is upgraded. Code scanning
+on a private repository needs GitHub Advanced Security; a refused upload is a
+warning, not a failed scan. To upload with `github/codeql-action/upload-sarif`
+instead, set `sarif-file` and pass that path to it.
 
 ## How it works
 

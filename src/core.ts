@@ -307,6 +307,48 @@ export function gateRules(
   return rules
 }
 
+// ── SARIF ────────────────────────────────────────────────────────────────────
+
+/** `security-severity` GitHub sorts alerts by: the middle of each CVSS band. */
+const SECURITY_SEVERITY: Record<string, string> = { critical: '9.5', high: '8.0', medium: '5.5', low: '2.0' }
+const SARIF_LEVEL: Record<string, string> = { critical: 'error', high: 'error', medium: 'warning', low: 'note', unknown: 'note' }
+
+export function advisoryUrl(id: string): string {
+  return /^CVE-/.test(id) ? `https://vuln.mlab.sh/cve/${id}` : `https://osv.dev/vulnerability/${encodeURIComponent(id)}`
+}
+
+/**
+ * A SARIF 2.1.0 log for GitHub Code Scanning: one rule per advisory, one result
+ * per finding on the line that declares the package. The fingerprint is the
+ * package and advisory, so an alert survives the lockfile moving lines.
+ */
+export function toSarif(findings: Finding[], lineOf: (f: Finding) => number): object {
+  const rules = new Map<string, object>()
+  for (const f of findings) {
+    if (rules.has(f.cve)) continue
+    rules.set(f.cve, {
+      id: f.cve,
+      shortDescription: { text: f.summary ?? f.cve },
+      helpUri: advisoryUrl(f.cve),
+      properties: { tags: ['security', 'dependency'], ...(SECURITY_SEVERITY[f.severity] ? { 'security-severity': SECURITY_SEVERITY[f.severity] } : {}) },
+    })
+  }
+  return {
+    $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
+    version: '2.1.0',
+    runs: [{
+      tool: { driver: { name: 'vuln.mlab.sh', informationUri: 'https://vuln.mlab.sh', rules: [...rules.values()] } },
+      results: findings.map(f => ({
+        ruleId: f.cve,
+        level: SARIF_LEVEL[f.severity],
+        message: { text: `${f.pkg} is affected by ${f.cve} (${f.severity})${f.fixed ? `, fixed in ${f.fixed}` : ''}.` },
+        locations: [{ physicalLocation: { artifactLocation: { uri: f.file.replace(/\\/g, '/') }, region: { startLine: lineOf(f) } } }],
+        partialFingerprints: { 'mlabFinding/v1': `${f.file}|${f.pkg}|${f.cve}` },
+      })),
+    }],
+  }
+}
+
 // ── Refusals ─────────────────────────────────────────────────────────────────
 
 export type RefusalKind = 'cooldown' | 'too-large' | 'auth' | 'unparseable' | 'http'

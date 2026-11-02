@@ -8,6 +8,9 @@
   (`severity>=high`, `unscanned`, `incomplete`), and `mode: notify` to never
   fail. Fired rules are listed in the job summary. Without lists, `fail-on`
   and `fail-on-incomplete` behave as before.
+- **SARIF and GitHub Code Scanning**: `sarif-file` writes the findings as SARIF
+  2.1.0, `upload-sarif: true` uploads them to the Security tab (needs
+  `security-events: write`). Output `sarif-file`.
 
 ## v1.1.0 - 2026-10-11
 
