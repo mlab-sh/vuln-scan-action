@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## v1.2.0 - 2026-11-02
+
+Gate rules, exploitation data, and what to do with a scan beyond the job log.
 
 ### Added
 

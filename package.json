@@ -1,6 +1,6 @@
 {
   "name": "vuln-scan-action",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "GitHub Action to scan lockfiles and SBOMs for known CVEs via vuln.mlab.sh",
   "main": "dist/index.js",
   "scripts": {
