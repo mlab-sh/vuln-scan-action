@@ -255,7 +255,7 @@ export type GateAction = 'block' | 'warn'
 
 export interface Rule {
   raw: string
-  kind: 'severity' | 'unscanned' | 'incomplete' | 'kev' | 'epss' | 'actor'
+  kind: 'severity' | 'unscanned' | 'incomplete' | 'kev' | 'epss' | 'actor' | 'score'
   value?: number
 }
 
@@ -280,8 +280,10 @@ export function parseRule(raw: string): Rule {
   if (sev && THRESHOLDS[sev[1]] !== undefined && THRESHOLDS[sev[1]] !== Infinity) return { raw, kind: 'severity', value: THRESHOLDS[sev[1]] }
   const epss = /^epss>=(\d*\.?\d+)$/.exec(s)
   if (epss && Number(epss[1]) <= 1) return { raw, kind: 'epss', value: Number(epss[1]) }
+  const score = /^score<(\d+)$/.exec(s)
+  if (score && Number(score[1]) <= 100) return { raw, kind: 'score', value: Number(score[1]) }
   if (s === 'unscanned' || s === 'incomplete' || s === 'kev' || s === 'actor') return { raw, kind: s }
-  throw new Error(`Unknown gate rule '${raw}'. Expected severity>=<any|low|medium|high|critical>, kev, epss>=<0..1>, actor, unscanned or incomplete.`)
+  throw new Error(`Unknown gate rule '${raw}'. Expected severity>=<any|low|medium|high|critical>, kev, epss>=<0..1>, actor, score<<0..100>, unscanned or incomplete.`)
 }
 
 /** Which lookups the rules need: CVE intel (KEV, EPSS) and threat actors. */
@@ -308,6 +310,10 @@ function reasonFor(r: Rule, input: GateInput): string | undefined {
       return input.unscannedFiles ? `${input.unscannedFiles} lockfile(s) could not be scanned` : undefined
     case 'incomplete':
       return input.partial ? 'the scan did not cover every package' : undefined
+    case 'score': {
+      const score = scoreFor(input.findings)
+      return score < r.value! ? `the score is ${score}/100` : undefined
+    }
     default:
       return undefined
   }
@@ -347,6 +353,50 @@ export function gateRules(
   const rules = { block: block.map(parseRule), warn: warn.map(parseRule) }
   if (![...rules.block, ...rules.warn].some(r => r.kind === 'unscanned')) rules.block.push(parseRule('unscanned'))
   return rules
+}
+
+// ── Score and badge ──────────────────────────────────────────────────────────
+
+// ponytail: a flat penalty per finding, worst bands and KEV weigh most. Upgrade
+// to the inkdex score once it covers lockfiles.
+const PENALTY: Record<string, number> = { critical: 20, high: 10, medium: 4, low: 1, unknown: 2 }
+const KEV_PENALTY = 20
+
+/** 100 with no finding, down to 0. */
+export function scoreFor(findings: Finding[]): number {
+  const penalty = findings.reduce((n, f) => n + PENALTY[f.severity] + (f.intel?.kev ? KEV_PENALTY : 0), 0)
+  return Math.max(0, 100 - penalty)
+}
+
+function badgeColor(score: number): string {
+  if (score >= 90) return '#4c1'
+  if (score >= 70) return '#97ca00'
+  if (score >= 50) return '#dfb317'
+  if (score >= 30) return '#fe7d37'
+  return '#e05d44'
+}
+
+const xmlEscape = (s: string) => s.replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c]!)
+
+/** A shields.io "flat" badge. Text width is estimated (7 px a character at 11 px Verdana), close enough for short labels. */
+export function badgeSvg(label: string, message: string, color: string): string {
+  const lw = label.length * 7 + 10
+  const mw = message.length * 7 + 10
+  const w = lw + mw
+  const [l, m] = [xmlEscape(label), xmlEscape(message)]
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="20" role="img" aria-label="${l}: ${m}"><title>${l}: ${m}</title>`
+    + `<linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient>`
+    + `<clipPath id="r"><rect width="${w}" height="20" rx="3" fill="#fff"/></clipPath>`
+    + `<g clip-path="url(#r)"><rect width="${lw}" height="20" fill="#555"/><rect x="${lw}" width="${mw}" height="20" fill="${color}"/><rect width="${w}" height="20" fill="url(#s)"/></g>`
+    + `<g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">`
+    + `<text x="${lw / 2}" y="14">${l}</text><text x="${lw + mw / 2}" y="14">${m}</text></g></svg>\n`
+}
+
+/** The badge of a run: the score, or `incomplete` in grey when the scan did not cover everything. */
+export function scoreBadge(findings: Finding[], incomplete: boolean, label = 'mlab vulns'): string {
+  if (incomplete) return badgeSvg(label, 'incomplete', '#9f9f9f')
+  const score = scoreFor(findings)
+  return badgeSvg(label, `${score}/100`, badgeColor(score))
 }
 
 // ── SARIF ────────────────────────────────────────────────────────────────────

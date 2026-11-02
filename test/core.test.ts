@@ -1,7 +1,7 @@
 // node --test test/*.test.ts (Node 24+ runs TypeScript by stripping types)
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cveOf, errorFor, evaluateGate, findingsOf, gateRules, isIgnored, locateLine, intelNeeded, intelOf, monitorBranch, parseRule, rawUrl, scoreOf, severityOf, toSarif, KNOWN, THRESHOLDS } from '../src/core.ts'
+import { cveOf, errorFor, evaluateGate, findingsOf, gateRules, isIgnored, locateLine, intelNeeded, intelOf, monitorBranch, parseRule, rawUrl, scoreBadge, scoreFor, scoreOf, severityOf, toSarif, KNOWN, THRESHOLDS } from '../src/core.ts'
 import type { Finding } from '../src/core.ts'
 import { parseFlatYaml } from '../src/vulnYml.ts'
 
@@ -140,4 +140,18 @@ test('monitoring: only a push to the default branch, from the branch tip', () =>
   assert.match(monitorBranch({ GITHUB_EVENT_NAME: 'push', GITHUB_REF: 'refs/heads/main' }, undefined).skip!, /unknown/)
   assert.equal(rawUrl('mlab-sh/app', 'release/1', 'sub dir\\Cargo.lock'),
     'https://raw.githubusercontent.com/mlab-sh/app/release%2F1/sub%20dir/Cargo.lock')
+})
+
+test('score, score rule and badge', () => {
+  assert.equal(scoreFor([]), 100)
+  assert.equal(scoreFor([finding('high'), finding('low'), { ...finding('medium'), intel: { kev: true } }]), 100 - 10 - 1 - 4 - 20)
+  assert.equal(scoreFor(Array(10).fill(finding('critical'))), 0)
+  const rules = gateRules({ block: ['score<80'] }, 'any', false)
+  assert.equal(evaluateGate(rules, { findings: [finding('critical')], unscannedFiles: 0, partial: false }).length, 0) // exactly 80
+  assert.equal(evaluateGate(rules, { findings: [finding('critical'), finding('low')], unscannedFiles: 0, partial: false })[0].reason, 'the score is 79/100')
+  assert.throws(() => parseRule('score<101'), /Unknown gate rule/)
+  const svg = scoreBadge([finding('high')], false)
+  assert.match(svg, /^<svg[^>]+aria-label="mlab vulns: 90\/100"/)
+  assert.match(svg, /fill="#4c1"/)
+  assert.match(scoreBadge([], true), /incomplete/)
 })

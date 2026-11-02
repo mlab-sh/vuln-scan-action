@@ -76,6 +76,12 @@ inputs:
       contents:read token, not GITHUB_TOKEN (it expires with the job).
     required: false
     default: ""
+  badge-file:
+    description: >
+      Write a README badge (SVG, the 0-100 score) to this path, e.g. .github/badges/vulns.svg.
+      The Action only writes the file: commit it in a later step.
+    required: false
+    default: ""
   github-token:
     description: "Token for the GitHub API (SARIF upload)."
     required: false
@@ -102,6 +108,8 @@ outputs:
     description: "Number of packages left out because a manifest exceeded the package limit."
   failed:
     description: "'true' if a block gate rule fired (by default: fail-on threshold met, a lockfile could not be scanned, or incomplete with fail-on-incomplete), regardless of soft-fail."
+  score:
+    description: "0 to 100: 100 with no finding, minus 20 a critical, 10 a high, 4 a medium, 1 a low, 2 an unknown, 20 more when in KEV."
   sarif-file:
     description: "Path of the SARIF file written, when one was."
 

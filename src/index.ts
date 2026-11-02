@@ -4,7 +4,7 @@ import * as path from 'node:path'
 import * as zlib from 'node:zlib'
 import {
   Finding, GateHit, KNOWN, Refusal, ScanRefused, ScanResponse, SEV_RANK, SEVERITIES, Upgrade,
-  errorFor, evaluateGate, findingsOf, gateRules, intelNeeded, intelOf, isIgnored, locateLine, monitorBranch, rawUrl, toSarif,
+  errorFor, evaluateGate, findingsOf, gateRules, intelNeeded, intelOf, isIgnored, locateLine, monitorBranch, rawUrl, scoreBadge, scoreFor, toSarif,
 } from './core'
 import { loadVulnYml } from './vulnYml'
 
@@ -349,7 +349,7 @@ function setOutputs(o: Record<string, string | number | boolean>) {
 
 const EMPTY_OUTPUTS = {
   total: 0, 'vulnerable-packages': 0, failed: false, incomplete: false, 'not-scanned': 0,
-  critical: 0, high: 0, medium: 0, low: 0, unknown: 0,
+  critical: 0, high: 0, medium: 0, low: 0, unknown: 0, score: 100,
 }
 
 async function run(): Promise<void> {
@@ -441,6 +441,13 @@ async function run(): Promise<void> {
   writeSummary(session, all, reports, counts, hits)
   await core.summary.write()
 
+  const badgeFile = core.getInput('badge-file')
+  if (badgeFile) {
+    fs.mkdirSync(path.dirname(badgeFile), { recursive: true })
+    fs.writeFileSync(badgeFile, scoreBadge(all, incomplete))
+    core.info(`Badge written to ${badgeFile}.`)
+  }
+
   const reasons = hits.filter(h => h.action === 'block').map(h => h.reason)
   for (const h of hits) if (h.action === 'warn') core.warning(`Gate (warn) ${h.rule}: ${h.reason}`)
   const failed = reasons.length > 0
@@ -453,6 +460,7 @@ async function run(): Promise<void> {
     failed,
     incomplete,
     'not-scanned': notScanned,
+    score: scoreFor(all),
   })
 
   const line = all.length

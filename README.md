@@ -62,6 +62,7 @@ scans land in your history on vuln.mlab.sh.
 | `upload-sarif` | `false` | If `true`, upload the SARIF to GitHub Code Scanning (needs `security-events: write`). |
 | `monitor` | `false` | If `true`, on a push to the default branch, register the lockfiles on vuln.mlab.sh for continuous monitoring (Pro plan). |
 | `monitor-source-token` | *(none)* | Private repo only: a read-only token mlab uses to fetch the lockfiles on each rescan. |
+| `badge-file` | *(none)* | Write an SVG badge with the score to this path (commit it in a later step). |
 | `github-token` | `${{ github.token }}` | Token for the GitHub API (SARIF upload). |
 
 **Auto-detected lockfiles:** `Cargo.lock`, `package-lock.json`,
@@ -112,6 +113,7 @@ warn:
 | `kev` | a finding's CVE is in CISA KEV or the EU KEV: exploited in the wild |
 | `epss>=<0..1>` | a finding's EPSS (probability of exploitation in 30 days) is at least that, e.g. `epss>=0.1` |
 | `actor` | a threat actor is documented exploiting a finding's CVE ([actors.mlab.sh](https://actors.mlab.sh)) |
+| `score<<0..100>` | the run's score (see the `score` output) is below that, e.g. `score<70` |
 | `unscanned` | a lockfile could not be scanned at all |
 | `incomplete` | some package of a scanned lockfile was not checked (package limit, git or path dependency, outage) |
 
@@ -146,6 +148,7 @@ it. An unknown rule fails the run rather than leaving the gate open.
 | `critical`, `high`, `medium`, `low`, `unknown` | Findings per severity. |
 | `incomplete` | `true` if some package was not scanned (limit, unscannable entry, outage, or a lockfile that failed). |
 | `not-scanned` | Packages left out because a manifest exceeded the package limit. |
+| `score` | 0 to 100: 100 with no finding, minus 20 a critical, 10 a high, 4 a medium, 1 a low, 2 an unknown, and 20 more for a CVE in KEV (when a `kev`, `epss` or `actor` rule looked it up). |
 | `sarif-file` | Path of the SARIF file written, when one was. |
 | `failed` | `true` if a `block` rule fired (by default: `fail-on` threshold met, a lockfile could not be scanned, or incomplete with `fail-on-incomplete`), regardless of `soft-fail`. |
 
@@ -203,6 +206,37 @@ ranked by severity; alerts close when the dependency is upgraded. Code scanning
 on a private repository needs GitHub Advanced Security; a refused upload is a
 warning, not a failed scan. To upload with `github/codeql-action/upload-sarif`
 instead, set `sarif-file` and pass that path to it.
+
+**README badge with the score:**
+
+```yaml
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+steps:
+  - uses: actions/checkout@v4
+  - uses: mlab-sh/vuln-scan-action@v1
+    with:
+      badge-file: .github/badges/vulns.svg
+      soft-fail: "true"
+      token: ${{ secrets.VULN_MLAB_TOKEN }}
+  - name: Commit the badge
+    run: |
+      git config user.name "github-actions[bot]"
+      git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      git add .github/badges/vulns.svg
+      git diff --cached --quiet || (git commit -m "update vulnerability badge [skip ci]" && git push)
+```
+
+```markdown
+![vulnerabilities](.github/badges/vulns.svg)
+```
+
+The badge shows `score/100`, green to red, or a grey `incomplete` when the scan
+did not cover every package. Lockfiles monitored on vuln.mlab.sh also have a
+server-side badge (`/badge/sbom/<key>.svg`) that follows the rescans.
 
 **Continuous monitoring on vuln.mlab.sh:**
 

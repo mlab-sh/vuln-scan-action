@@ -15,6 +15,8 @@
 - **Continuous SBOM monitoring**: `monitor: true` registers the scanned
   lockfiles on vuln.mlab.sh (Pro plan) on a push to the default branch, or asks
   for a rescan when already monitored. `monitor-source-token` for private repos.
+- **Score and README badge**: output `score` (0 to 100), a `score<N` gate
+  rule, and `badge-file` to write an SVG badge with the score.
 - **SARIF and GitHub Code Scanning**: `sarif-file` writes the findings as SARIF
   2.1.0, `upload-sarif: true` uploads them to the Security tab (needs
   `security-events: write`). Output `sarif-file`.
